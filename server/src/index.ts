@@ -16,7 +16,26 @@ const server = http.createServer(app);
 // Configure CORS to allow Next.js client connection
 const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:3000';
 app.use(cors({
-  origin: true,
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, etc)
+    if (!origin) return callback(null, true);
+    // Allow localhost for dev
+    if (origin.includes('localhost')) return callback(null, true);
+    // Allow any Railway, Render, ngrok, or vercel domain
+    if (
+      origin.includes('.up.railway.app') ||
+      origin.includes('.railway.app') ||
+      origin.includes('.onrender.com') ||
+      origin.includes('.ngrok') ||
+      origin.includes('.ngrok-free.app') ||
+      origin.includes('.ngrok.io') ||
+      origin.includes('.vercel.app') ||
+      (process.env.CLIENT_ORIGIN && origin === process.env.CLIENT_ORIGIN)
+    ) {
+      return callback(null, true);
+    }
+    callback(null, true); // Allow all for now (can restrict later)
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true
 }));
