@@ -65,7 +65,7 @@ export default function Home() {
 
     try {
       const slug = rawTarget.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-') || 'room';
-      resolvedRoomId = slug;
+      let resolvedRoomId = slug;
 
       // Try connecting to backend with a 4-second timeout
       const controller = new AbortController();
