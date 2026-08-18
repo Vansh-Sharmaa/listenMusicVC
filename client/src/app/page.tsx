@@ -78,15 +78,25 @@ export default function Home() {
         const createdRoom = await createRes.json();
         resolvedRoomId = createdRoom.id;
       } else {
-        // Join Existing Room: Check if room exists!
-        const checkRes = await fetch(`${serverUrl}/api/rooms/${encodeURIComponent(rawTarget.trim())}`);
+        // Join Existing Room: Check if room exists, or auto-create if joined via link
+        let checkRes = await fetch(`${serverUrl}/api/rooms/${encodeURIComponent(rawTarget.trim())}`);
         if (!checkRes.ok) {
-          alert(`Room "${rawTarget.trim()}" does not exist yet! Please click "Create Room" to create it first.`);
-          setLoading(false);
-          return;
+          // If room does not exist, automatically create it so joining via link works effortlessly
+          const autoCreateRes = await fetch(`${serverUrl}/api/rooms`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: rawTarget.trim(), hostId: userId }),
+          });
+          if (autoCreateRes.ok) {
+            const autoCreated = await autoCreateRes.json();
+            resolvedRoomId = autoCreated.id;
+          } else {
+            resolvedRoomId = rawTarget.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-') || 'room';
+          }
+        } else {
+          const existingRoom = await checkRes.json();
+          resolvedRoomId = existingRoom.id;
         }
-        const existingRoom = await checkRes.json();
-        resolvedRoomId = existingRoom.id;
       }
 
       // Fetch Token for resolvedRoomId
@@ -97,7 +107,7 @@ export default function Home() {
       });
 
       if (!tokenRes.ok) {
-        throw new Error('Room not found or token generation failed');
+        throw new Error('Token generation failed');
       }
 
       const tokenData = await tokenRes.json();
@@ -108,9 +118,9 @@ export default function Home() {
       setRoomId(resolvedRoomId);
       setActiveRoomId(resolvedRoomId);
       setJoined(true);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to join call:', error);
-      alert('Error: Could not connect to room. Verify that the server is running on port 3001.');
+      alert(`Connection Error: Could not reach the backend server.\n\nBackend URL: ${serverUrl}\n\nMake sure your backend is deployed and NEXT_PUBLIC_SERVER_URL is set in Vercel.`);
     } finally {
       setLoading(false);
     }
