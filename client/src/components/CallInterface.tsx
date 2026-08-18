@@ -40,13 +40,17 @@ interface PeerStream {
   stream: MediaStream;
 }
 
-// Safe remote video player with guaranteed autoplay
-const RemoteVideoPlayer: React.FC<{ stream: MediaStream }> = ({ stream }) => {
+// Safe remote video player with guaranteed autoplay and avatar fallback
+const RemoteVideoPlayer: React.FC<{ stream: MediaStream; username?: string }> = ({ stream, username = 'Partner' }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [hasVideoTrack, setHasVideoTrack] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !stream) return;
+
+    const vTracks = stream.getVideoTracks();
+    setHasVideoTrack(vTracks.length > 0);
 
     video.srcObject = stream;
 
@@ -57,18 +61,39 @@ const RemoteVideoPlayer: React.FC<{ stream: MediaStream }> = ({ stream }) => {
     };
 
     playVideo();
-    video.onloadedmetadata = playVideo;
+    video.onloadedmetadata = () => {
+      setHasVideoTrack(stream.getVideoTracks().length > 0);
+      playVideo();
+    };
     video.oncanplay = playVideo;
+
+    stream.onaddtrack = () => {
+      setHasVideoTrack(stream.getVideoTracks().length > 0);
+      if (videoRef.current) {
+        videoRef.current.srcObject = new MediaStream(stream.getTracks());
+        playVideo();
+      }
+    };
   }, [stream]);
 
   return (
-    <video
-      ref={videoRef}
-      autoPlay
-      muted
-      playsInline
-      className="w-full h-full object-cover"
-    />
+    <div className="relative w-full h-full flex items-center justify-center bg-[#18181b]">
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        className={`w-full h-full object-cover ${!hasVideoTrack ? 'hidden' : ''}`}
+      />
+      {!hasVideoTrack && (
+        <div className="flex flex-col items-center justify-center gap-3 select-none">
+          <div className="h-20 w-20 rounded-full bg-gradient-to-br from-fuchsia-600 to-indigo-600 flex items-center justify-center text-2xl font-bold text-white shadow-xl border border-white/20 animate-pulse">
+            {username.charAt(0).toUpperCase()}
+          </div>
+          <span className="text-xs text-white/50">{username} (Camera Connecting...)</span>
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -274,12 +299,24 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       }
     };
 
-    pc.onsignalingstatechange = () => {
-      console.log(`[WebRTC] Signaling state with ${peerUsername}: ${pc.signalingState}`);
-    };
-
-    pc.onconnectionstatechange = () => {
-      console.log(`[WebRTC] Connection state with ${peerUsername}: ${pc.connectionState}`);
+    pc.onnegotiationneeded = async () => {
+      console.log(`[WebRTC] onnegotiationneeded with ${peerUsername} (state: ${pc.signalingState})`);
+      if (pc.signalingState !== 'stable' || makingOfferRef.current.get(targetSocketId)) return;
+      try {
+        makingOfferRef.current.set(targetSocketId, true);
+        const offer = await pc.createOffer();
+        if (pc.signalingState !== 'stable') return;
+        await pc.setLocalDescription(offer);
+        socketRef.current?.emit('webrtc:offer', {
+          targetSocketId,
+          offer: pc.localDescription
+        });
+        console.log(`[WebRTC] → Negotiation offer sent to ${targetSocketId}`);
+      } catch (err) {
+        console.warn('[WebRTC] Negotiation offer error:', err);
+      } finally {
+        makingOfferRef.current.set(targetSocketId, false);
+      }
     };
 
     // Remote track handler
@@ -1044,7 +1081,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
               if (videoTracks.length <= 1) {
                 return [
                   <div key={peer.socketId} className="bg-[#18181b] aspect-video rounded-3xl overflow-hidden border border-white/10 relative shadow-2xl flex items-center justify-center">
-                    <RemoteVideoPlayer stream={peer.stream} />
+                    <RemoteVideoPlayer stream={peer.stream} username={peer.username} />
                     <span className="absolute bottom-4 left-4 text-xs font-semibold bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm flex items-center gap-1.5 z-10">
                       <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
                       {peer.username}
@@ -1057,7 +1094,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                 const isScreen = idx > 0;
                 return (
                   <div key={`${peer.socketId}_${track.id}`} className={`bg-[#18181b] aspect-video rounded-3xl overflow-hidden ${isScreen ? 'border border-emerald-500/30' : 'border border-white/10'} relative shadow-2xl flex items-center justify-center`}>
-                    <RemoteVideoPlayer stream={singleStream} />
+                    <RemoteVideoPlayer stream={singleStream} username={peer.username} />
                     <span className={`absolute bottom-4 left-4 text-xs font-semibold ${isScreen ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/30' : 'bg-black/60 text-white border-white/10'} px-3 py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 z-10`}>
                       {isScreen ? <Tv size={14} /> : <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />}
                       {peer.username} {isScreen ? "'s Screen Share" : ''}
