@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+import * as fs from 'fs';
 import { apiRouter } from './routes/api';
 import { setupSockets } from './sockets/socket';
 
@@ -48,11 +49,16 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // Support parsing raw binary bodies (used for direct binary music uploads)
 app.use('/api/music/upload', express.raw({ type: 'audio/*', limit: '50mb' }));
 
-// Serve static music files
-// Files will be located in the root-level 'public' folder
-const staticPath = path.join(__dirname, '../../public');
-app.use(express.static(staticPath));
-console.log(`Serving static files from: ${staticPath}`);
+// Serve static music files safely
+try {
+  const staticPath = path.join(process.cwd(), 'public');
+  if (fs.existsSync(staticPath)) {
+    app.use(express.static(staticPath));
+    console.log(`Serving static files from: ${staticPath}`);
+  }
+} catch (err) {
+  console.warn('Static directory warning:', err);
+}
 
 // Register API Routes
 app.use('/api', apiRouter);
@@ -76,9 +82,9 @@ const io = new Server(server, {
 // Setup sockets
 setupSockets(io);
 
-// Start server
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
+// Start server on 0.0.0.0 for container hosting (Render, Railway, etc.)
+const PORT = Number(process.env.PORT) || 3001;
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`===============================================`);
   console.log(`  ListenMusicVC Server running on port ${PORT}`);
   console.log(`  Client Origin: ${clientOrigin}`);

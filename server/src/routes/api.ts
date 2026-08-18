@@ -7,10 +7,14 @@ import { randomUUID } from 'crypto';
 
 export const apiRouter = Router();
 
-// Ensure public/music uploads directory exists
-const UPLOADS_DIR = path.join(__dirname, '../../../public/music');
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+// Ensure uploads directory exists safely
+const UPLOADS_DIR = path.join(process.cwd(), 'public/music');
+try {
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  }
+} catch (e) {
+  console.warn('Could not create uploads directory at', UPLOADS_DIR, e);
 }
 
 // POST /api/rooms - Create a room

@@ -76,7 +76,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   onLeave
 }) => {
   // Context hooks
-  const { socket, joinRoom, sendReaction, participants } = useSocket();
+  const { socket, joinRoom, sendReaction, participants, isConnected } = useSocket();
   const {
     initAudio,
     processLocalMicTrack,
@@ -618,17 +618,35 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             <Copy size={12} />
             <span>Copy Link</span>
           </button>
-          <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20 font-semibold uppercase flex items-center gap-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Live WebRTC
-          </span>
+          
+          {isConnected ? (
+            <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2.5 py-0.5 rounded-full border border-emerald-500/20 font-semibold uppercase flex items-center gap-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Connected
+            </span>
+          ) : (
+            <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2.5 py-0.5 rounded-full border border-amber-500/30 font-semibold flex items-center gap-1.5" title="Connecting to signaling backend server...">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-ping" />
+              Connecting to Server...
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2 text-xs text-white/60 bg-white/5 px-3 py-1 rounded-full border border-white/5">
-          <Users size={14} className="text-emerald-400" />
-          <span>{totalParticipants} Participant(s)</span>
+          <Users size={14} className={totalParticipants > 1 ? "text-emerald-400" : "text-zinc-400"} />
+          <span className={totalParticipants > 1 ? "text-white font-semibold" : "text-white/60"}>
+            {totalParticipants} Participant{totalParticipants === 1 ? '' : 's'}
+          </span>
         </div>
       </div>
+
+      {!isConnected && (
+        <div className="bg-amber-950/70 border-b border-amber-500/30 text-amber-200 text-xs px-6 py-1.5 flex items-center justify-between">
+          <span>
+            ⏳ Connecting to backend signaling server... If using free-tier Render, it may take ~30s to wake up on first visit.
+          </span>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden relative">
