@@ -79,25 +79,10 @@ const ICE_SERVERS: RTCConfiguration = {
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
     { urls: 'stun:stun.services.mozilla.com' },
-    { urls: 'stun:stun.relay.metered.ca:80' },
-    {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    }
-  ],
-  iceCandidatePoolSize: 10
+    { urls: 'stun:global.stun.twilio.com:3478' }
+  ]
 };
 
 export const CallInterface: React.FC<CallInterfaceProps> = ({
@@ -268,11 +253,24 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       }
     };
 
-    pc.oniceconnectionstatechange = () => {
+    pc.oniceconnectionstatechange = async () => {
       console.log(`[WebRTC] ICE state with ${peerUsername}: ${pc.iceConnectionState}`);
       if (pc.iceConnectionState === 'failed') {
-        console.log('[WebRTC] ICE failed, restarting...');
-        pc.restartIce();
+        console.log(`[WebRTC] ICE failed with ${peerUsername}, initiating ICE restart offer...`);
+        try {
+          makingOfferRef.current.set(targetSocketId, true);
+          const offer = await pc.createOffer({ iceRestart: true });
+          await pc.setLocalDescription(offer);
+          socketRef.current?.emit('webrtc:offer', {
+            targetSocketId,
+            offer: pc.localDescription
+          });
+          console.log(`[WebRTC] → ICE restart offer sent to ${targetSocketId}`);
+        } catch (e) {
+          console.warn('[WebRTC] ICE restart error:', e);
+        } finally {
+          makingOfferRef.current.set(targetSocketId, false);
+        }
       }
     };
 
@@ -389,13 +387,13 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     // Fallback URL preset lookup if trackData wasn't attached
     if (!trackUrl && musicState.currentTrackId) {
       const presetList: Record<string, string> = {
-        'online-1': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-        'online-2': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-        'online-3': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
-        'online-4': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3',
-        'rf-1': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-        'rf-2': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-        'rf-3': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
+        'online-1': 'https://ia802802.us.archive.org/5/items/lofi-study-112191/lofi-study-112191.mp3',
+        'online-2': 'https://ia800905.us.archive.org/19/items/FREE_background_music_loops/chill_groove.mp3',
+        'online-3': 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3',
+        'online-4': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+        'rf-1': 'https://ia802802.us.archive.org/5/items/lofi-study-112191/lofi-study-112191.mp3',
+        'rf-2': 'https://ia800905.us.archive.org/19/items/FREE_background_music_loops/chill_groove.mp3',
+        'rf-3': 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3',
       };
       trackUrl = presetList[musicState.currentTrackId] || '';
     }
@@ -979,7 +977,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Permanent hidden music audio element */}
-        <audio ref={musicAudioRef} playsInline preload="auto" crossOrigin="anonymous" className="hidden" />
+        <audio ref={musicAudioRef} playsInline preload="auto" className="hidden" />
 
         {autoplayBlocked && (
           <button
