@@ -187,8 +187,8 @@ export function setupSockets(io: Server) {
           });
         }
 
-        // Broadcast music state change to all other clients in the room
-        socket.to(roomId).emit('music:state-change', {
+        // Broadcast music state change to all clients in the room
+        io.to(roomId).emit('music:state-change', {
           action,
           trackId: updatedState?.currentTrackId || trackId,
           position: updatedState?.lastPosition !== undefined ? updatedState.lastPosition : position,

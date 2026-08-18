@@ -190,22 +190,15 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   }, []);
 
   const addTracksToPC = useCallback((pc: RTCPeerConnection, stream: MediaStream) => {
+    const existingSenders = pc.getSenders();
+    const existingTrackIds = new Set(existingSenders.map(s => s.track?.id).filter(Boolean));
     stream.getTracks().forEach(track => {
-      // Find matching transceiver or sender
-      const senders = pc.getSenders();
-      const existingSender = senders.find(s => s.track?.id === track.id || (s.track?.kind === track.kind && !s.track));
-      if (existingSender) {
-        existingSender.replaceTrack(track).catch(e => console.warn('[WebRTC] replaceTrack error:', e));
-        console.log(`[WebRTC] Replaced ${track.kind} track on existing sender`);
-      } else {
-        const alreadyHasTrack = senders.some(s => s.track?.id === track.id);
-        if (!alreadyHasTrack) {
-          try {
-            pc.addTrack(track, stream);
-            console.log(`[WebRTC] Added local ${track.kind} track to PC`);
-          } catch (e) {
-            console.warn('[WebRTC] addTrack error:', e);
-          }
+      if (!existingTrackIds.has(track.id)) {
+        try {
+          pc.addTrack(track, stream);
+          console.log(`[WebRTC] Added local ${track.kind} track (${track.id}) to PC`);
+        } catch (e) {
+          console.warn('[WebRTC] addTrack error:', e);
         }
       }
     });
@@ -258,14 +251,6 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     iceCandidateQueuesRef.current.set(targetSocketId, []);
     makingOfferRef.current.set(targetSocketId, false);
 
-    // Explicitly add transceivers to guarantee bi-directional audio/video negotiation
-    try {
-      pc.addTransceiver('audio', { direction: 'sendrecv' });
-      pc.addTransceiver('video', { direction: 'sendrecv' });
-    } catch (e) {
-      console.warn('[WebRTC] addTransceiver warning:', e);
-    }
-
     // Attach local tracks immediately if available
     if (localStreamRef.current) {
       addTracksToPC(pc, localStreamRef.current);
@@ -303,16 +288,14 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     pc.ontrack = (event) => {
       console.log(`[WebRTC] ← Remote ${event.track.kind} track from ${peerUsername}`, event.track.id);
 
-      let peerStream = remoteStreamsRef.current.get(targetSocketId);
+      let peerStream = event.streams && event.streams[0] ? event.streams[0] : remoteStreamsRef.current.get(targetSocketId);
       if (!peerStream) {
         peerStream = new MediaStream();
-        remoteStreamsRef.current.set(targetSocketId, peerStream);
       }
-
-      // Add track to persistent stream if not already present
       if (!peerStream.getTracks().some(t => t.id === event.track.id)) {
         peerStream.addTrack(event.track);
       }
+      remoteStreamsRef.current.set(targetSocketId, peerStream);
 
       event.track.onended = () => {
         console.log(`[WebRTC] Track ended: ${event.track.kind} from ${peerUsername}`);
@@ -410,6 +393,9 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
         'online-2': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
         'online-3': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
         'online-4': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3',
+        'rf-1': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+        'rf-2': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+        'rf-3': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
       };
       trackUrl = presetList[musicState.currentTrackId] || '';
     }
@@ -418,7 +404,12 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       trackUrl = `${serverUrl}${trackUrl}`;
     }
 
-    if (trackUrl && audio.src !== trackUrl) {
+    if (!trackUrl) {
+      if (!audio.paused) audio.pause();
+      return;
+    }
+
+    if (audio.src !== trackUrl) {
       audio.src = trackUrl;
       audio.load();
     }
