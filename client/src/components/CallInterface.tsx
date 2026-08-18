@@ -40,22 +40,33 @@ interface PeerStream {
   stream: MediaStream;
 }
 
-// Safe remote video player using ref to avoid srcObject issues
+// Safe remote video player with guaranteed autoplay
 const RemoteVideoPlayer: React.FC<{ stream: MediaStream }> = ({ stream }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-    }
+    const video = videoRef.current;
+    if (!video || !stream) return;
+
+    video.srcObject = stream;
+
+    const playVideo = () => {
+      video.play().catch(err => {
+        console.warn('[WebRTC] Remote video play retry:', err.message);
+      });
+    };
+
+    playVideo();
+    video.onloadedmetadata = playVideo;
+    video.oncanplay = playVideo;
   }, [stream]);
 
   return (
     <video
       ref={videoRef}
       autoPlay
-      playsInline
       muted
+      playsInline
       className="w-full h-full object-cover"
     />
   );
@@ -66,7 +77,27 @@ const ICE_SERVERS: RTCConfiguration = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
-  ]
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:stun.services.mozilla.com' },
+    { urls: 'stun:stun.relay.metered.ca:80' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    }
+  ],
+  iceCandidatePoolSize: 10
 };
 
 export const CallInterface: React.FC<CallInterfaceProps> = ({
@@ -76,13 +107,16 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   onLeave
 }) => {
   // Context hooks
-  const { socket, joinRoom, sendReaction, participants, isConnected } = useSocket();
+  const { socket, joinRoom, sendReaction, participants, isConnected, musicState, getServerTime } = useSocket();
   const {
     initAudio,
     processLocalMicTrack,
     registerRemoteVoiceTrack,
     unregisterRemoteVoiceTrack,
     registerRemoteScreenShareTrack,
+    getMusicTrack,
+    musicVolume,
+    registerMusicElement,
     audioContext
   } = useAudioMixer();
 
@@ -99,6 +133,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   // Sidebar toggles
   const [activeSidebar, setActiveSidebar] = useState<'chat' | 'music' | 'mixer' | null>('music');
   const [showReactionMenu, setShowReactionMenu] = useState(false);
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
 
   // Mock speaking state (solo testing utility)
   const [mockSpeakingUser, setMockSpeakingUser] = useState<string | null>(null);
@@ -108,9 +143,19 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   // Refs - these are stable across renders
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamsRef = useRef<Map<string, MediaStream>>(new Map());
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const iceCandidateQueuesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const makingOfferRef = useRef<Map<string, boolean>>(new Map());
+  const localMediaReadyRef = useRef<boolean>(false);
+  const pendingOffersRef = useRef<{ socketId: string; username: string }[]>([]);
+
+  // Permanent music player ref
+  const musicAudioRef = useRef<HTMLAudioElement | null>(null);
+  const isSyncingMusicRef = useRef(false);
+
+  // Senders for screen share tracks per peer connection
+  const screenShareSendersRef = useRef<Map<string, RTCRtpSender[]>>(new Map());
 
   // We use a socketRef inside this component so all WebRTC callbacks get the latest socket
   // without needing to be inside a useEffect that re-registers on every socket change.
@@ -123,20 +168,64 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   // Helpers
   // ─────────────────────────────────────────────────────────────
 
+  const renegotiateAllPeers = useCallback(async () => {
+    console.log('[WebRTC] Starting renegotiation for all peers...');
+    for (const [sid, pc] of peerConnectionsRef.current.entries()) {
+      if (pc.signalingState === 'closed') continue;
+      try {
+        makingOfferRef.current.set(sid, true);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socketRef.current?.emit('webrtc:offer', {
+          targetSocketId: sid,
+          offer: pc.localDescription
+        });
+        console.log(`[WebRTC] → Renegotiation offer sent to ${sid}`);
+      } catch (e) {
+        console.error(`[WebRTC] Renegotiation offer error for ${sid}:`, e);
+      } finally {
+        makingOfferRef.current.set(sid, false);
+      }
+    }
+  }, []);
+
   const addTracksToPC = useCallback((pc: RTCPeerConnection, stream: MediaStream) => {
-    const existingSenders = pc.getSenders();
-    const existingTrackIds = new Set(existingSenders.map(s => s.track?.id).filter(Boolean));
     stream.getTracks().forEach(track => {
-      if (!existingTrackIds.has(track.id)) {
-        try {
-          pc.addTrack(track, stream);
-          console.log(`[WebRTC] Added local ${track.kind} track to PC`);
-        } catch (e) {
-          console.warn('[WebRTC] addTrack error:', e);
+      // Find matching transceiver or sender
+      const senders = pc.getSenders();
+      const existingSender = senders.find(s => s.track?.id === track.id || (s.track?.kind === track.kind && !s.track));
+      if (existingSender) {
+        existingSender.replaceTrack(track).catch(e => console.warn('[WebRTC] replaceTrack error:', e));
+        console.log(`[WebRTC] Replaced ${track.kind} track on existing sender`);
+      } else {
+        const alreadyHasTrack = senders.some(s => s.track?.id === track.id);
+        if (!alreadyHasTrack) {
+          try {
+            pc.addTrack(track, stream);
+            console.log(`[WebRTC] Added local ${track.kind} track to PC`);
+          } catch (e) {
+            console.warn('[WebRTC] addTrack error:', e);
+          }
         }
       }
     });
   }, []);
+
+  /** Add the music WebRTC track to a single PC (idempotent). */
+  const addMusicTrackToPC = useCallback((pc: RTCPeerConnection) => {
+    const musicTrack = getMusicTrack();
+    if (!musicTrack) return;
+    const existingSenders = pc.getSenders();
+    const alreadyAdded = existingSenders.some(s => s.track?.id === musicTrack.id);
+    if (!alreadyAdded) {
+      try {
+        pc.addTrack(musicTrack, new MediaStream([musicTrack]));
+        console.log('[WebRTC] Added music track to PC');
+      } catch (e) {
+        console.warn('[WebRTC] addTrack (music) error:', e);
+      }
+    }
+  }, [getMusicTrack]);
 
   const processQueuedCandidates = useCallback(async (sid: string, pc: RTCPeerConnection) => {
     const queue = iceCandidateQueuesRef.current.get(sid) || [];
@@ -169,10 +258,20 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     iceCandidateQueuesRef.current.set(targetSocketId, []);
     makingOfferRef.current.set(targetSocketId, false);
 
+    // Explicitly add transceivers to guarantee bi-directional audio/video negotiation
+    try {
+      pc.addTransceiver('audio', { direction: 'sendrecv' });
+      pc.addTransceiver('video', { direction: 'sendrecv' });
+    } catch (e) {
+      console.warn('[WebRTC] addTransceiver warning:', e);
+    }
+
     // Attach local tracks immediately if available
     if (localStreamRef.current) {
       addTracksToPC(pc, localStreamRef.current);
     }
+    // Attach music track if available
+    addMusicTrackToPC(pc);
 
     // ICE candidates
     pc.onicecandidate = ({ candidate }) => {
@@ -202,33 +301,48 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
     // Remote track handler
     pc.ontrack = (event) => {
-      console.log(`[WebRTC] ← Remote ${event.track.kind} track from ${peerUsername}`);
-      // Always use event.streams[0] if available, else wrap the track
-      const remoteStream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
+      console.log(`[WebRTC] ← Remote ${event.track.kind} track from ${peerUsername}`, event.track.id);
+
+      let peerStream = remoteStreamsRef.current.get(targetSocketId);
+      if (!peerStream) {
+        peerStream = new MediaStream();
+        remoteStreamsRef.current.set(targetSocketId, peerStream);
+      }
+
+      // Add track to persistent stream if not already present
+      if (!peerStream.getTracks().some(t => t.id === event.track.id)) {
+        peerStream.addTrack(event.track);
+      }
+
+      event.track.onended = () => {
+        console.log(`[WebRTC] Track ended: ${event.track.kind} from ${peerUsername}`);
+      };
+
+      // Create a fresh MediaStream reference so React state updates and video tags rebind
+      const freshStream = new MediaStream(peerStream.getTracks());
 
       setRemotePeers(prev => {
         const updated = new Map(prev);
-        const existing = updated.get(targetSocketId);
-        if (existing && existing.stream === remoteStream) return prev; // no change
         updated.set(targetSocketId, {
           socketId: targetSocketId,
           userId: targetSocketId,
           username: peerUsername,
-          stream: remoteStream
+          stream: freshStream
         });
         return updated;
       });
 
       if (event.track.kind === 'audio') {
-        registerRemoteVoiceTrack(targetSocketId, event.track);
+        registerRemoteVoiceTrack(targetSocketId + '_' + event.track.id, event.track);
+        registerRemoteScreenShareTrack(targetSocketId + '_screen_' + event.track.id, event.track);
       }
     };
 
     return pc;
-  }, [addTracksToPC, registerRemoteVoiceTrack]);
+  }, [addTracksToPC, addMusicTrackToPC, registerRemoteVoiceTrack, registerRemoteScreenShareTrack]);
 
   // ─────────────────────────────────────────────────────────────
-  // Init: join room + media
+  // Init: join room + media + permanent music sync
   // ─────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -236,11 +350,118 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     initAudio();
     startLocalMedia();
 
+    // Global unlock handler for browser autoplay policies
+    const unlockAudioAndVideo = () => {
+      if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume().catch(() => {});
+      }
+      if (musicAudioRef.current && musicAudioRef.current.paused && musicState.isPlaying) {
+        musicAudioRef.current.play().then(() => {
+          setAutoplayBlocked(false);
+        }).catch(() => {});
+      }
+    };
+
+    window.addEventListener('click', unlockAudioAndVideo);
+    window.addEventListener('touchstart', unlockAudioAndVideo);
+    window.addEventListener('keydown', unlockAudioAndVideo);
+
     return () => {
+      window.removeEventListener('click', unlockAudioAndVideo);
+      window.removeEventListener('touchstart', unlockAudioAndVideo);
+      window.removeEventListener('keydown', unlockAudioAndVideo);
       cleanupAll();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, userId, username]);
+  }, [roomId, userId, username, audioContext]);
+
+  // Sync music element with Web Audio mixer
+  useEffect(() => {
+    if (musicAudioRef.current) {
+      registerMusicElement(musicAudioRef.current);
+    }
+  }, [musicAudioRef.current, registerMusicElement]);
+
+  // Apply volume changes to permanent music audio element
+  useEffect(() => {
+    if (musicAudioRef.current) {
+      musicAudioRef.current.volume = Math.max(0, Math.min(1, musicVolume));
+    }
+  }, [musicVolume]);
+
+  // Permanent Shared Music Playback Synchronization (always running)
+  useEffect(() => {
+    const audio = musicAudioRef.current;
+    if (!audio) return;
+
+    if (!musicState.currentTrackId && !musicState.currentTrack) {
+      if (!audio.paused) audio.pause();
+      return;
+    }
+
+    const currentTrack = musicState.currentTrack;
+    const serverUrl = (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '');
+    let trackUrl = currentTrack?.url || '';
+
+    // Fallback URL preset lookup if trackData wasn't attached
+    if (!trackUrl && musicState.currentTrackId) {
+      const presetList: Record<string, string> = {
+        'online-1': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+        'online-2': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+        'online-3': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
+        'online-4': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3',
+      };
+      trackUrl = presetList[musicState.currentTrackId] || '';
+    }
+
+    if (trackUrl.startsWith('/')) {
+      trackUrl = `${serverUrl}${trackUrl}`;
+    }
+
+    if (trackUrl && audio.src !== trackUrl) {
+      audio.src = trackUrl;
+      audio.load();
+    }
+
+    const syncAudio = async () => {
+      if (isSyncingMusicRef.current || !audio.src) return;
+      isSyncingMusicRef.current = true;
+
+      try {
+        if (musicState.isPlaying) {
+          const elapsed = (getServerTime() - Number(musicState.lastPositionUpdatedAt)) / 1000;
+          const targetPos = Math.max(0, musicState.lastPosition + elapsed);
+
+          if (Math.abs(audio.currentTime - targetPos) > 0.6) {
+            audio.currentTime = targetPos;
+          }
+
+          if (audio.paused) {
+            await audio.play().catch(err => {
+              console.warn('[Music] Autoplay waiting for user gesture:', err.message);
+              setAutoplayBlocked(true);
+            });
+            setAutoplayBlocked(false);
+          }
+        } else {
+          if (!audio.paused) {
+            audio.pause();
+          }
+          if (Math.abs(audio.currentTime - musicState.lastPosition) > 0.6) {
+            audio.currentTime = musicState.lastPosition;
+          }
+        }
+      } catch (err) {
+        console.warn('[Music] Sync play exception:', err);
+      } finally {
+        isSyncingMusicRef.current = false;
+      }
+    };
+
+    syncAudio();
+    const interval = setInterval(syncAudio, 2000);
+    return () => clearInterval(interval);
+  }, [musicState, getServerTime]);
 
   // Sync local video element
   useEffect(() => {
@@ -252,13 +473,34 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   const startLocalMedia = async () => {
     let stream: MediaStream | null = null;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: true
-      });
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: 'user',
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            },
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            }
+          });
+        } catch (e1) {
+          console.warn('[Media] Ideal constraints failed, trying basic video/audio:', e1);
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true
+          });
+        }
+      }
       console.log('[Media] Real camera/mic acquired');
     } catch (err) {
-      console.warn('[Media] Camera/mic blocked, using canvas fallback:', err);
+      console.warn('[Media] Camera/mic blocked or unavailable, using canvas fallback:', err);
+    }
+
+    if (!stream) {
       stream = createFallbackStream();
     }
 
@@ -271,12 +513,38 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       processLocalMicTrack(micTrack).catch(e => console.warn('[Media] Mic process warning:', e));
     }
 
-    // Add tracks to any already-existing peer connections
-    peerConnectionsRef.current.forEach((pc, sid) => {
+    // BUG FIX #2: mark media as ready
+    localMediaReadyRef.current = true;
+
+    // Add local tracks (and music track) to any already-existing peer connections
+    peerConnectionsRef.current.forEach((pc, _sid) => {
       if (pc.signalingState !== 'closed') {
         addTracksToPC(pc, stream!);
+        addMusicTrackToPC(pc);
       }
     });
+
+    // BUG FIX #2 + #3: Now send any offers that were queued while media wasn't ready yet
+    // and add the music track to all PCs
+    for (const { socketId, username } of pendingOffersRef.current) {
+      const pc = peerConnectionsRef.current.get(socketId);
+      if (!pc || pc.signalingState === 'closed') continue;
+      try {
+        makingOfferRef.current.set(socketId, true);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socketRef.current?.emit('webrtc:offer', {
+          targetSocketId: socketId,
+          offer: pc.localDescription
+        });
+        console.log(`[WebRTC] → Deferred offer sent to ${socketId} (${username})`);
+      } catch (e) {
+        console.error('[WebRTC] Error sending deferred offer:', e);
+      } finally {
+        makingOfferRef.current.set(socketId, false);
+      }
+    }
+    pendingOffersRef.current = [];
   };
 
   const cleanupAll = () => {
@@ -346,11 +614,21 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
     // ── A. We just joined: server sends us the list of existing peers ──
     // We (the newcomer) initiate offers to each existing peer.
+    // BUG FIX #2: If local media isn't ready yet, create the PC (so we can accept ICE)
+    // but defer sending the offer until startLocalMedia() finishes.
     const onPeerList = async (payload: { peers: { socketId: string; userId: string; username: string }[] }) => {
       console.log('[WebRTC] peer-list received:', payload.peers);
       for (const peer of payload.peers) {
         if (peer.socketId === socket.id) continue; // skip self
         const pc = createPeerConnection(peer.socketId, peer.username || 'Participant');
+
+        if (!localMediaReadyRef.current) {
+          // Queue the offer — will be sent from startLocalMedia once stream is ready
+          console.log(`[WebRTC] Media not ready yet — deferring offer to ${peer.socketId}`);
+          pendingOffersRef.current.push({ socketId: peer.socketId, username: peer.username || 'Participant' });
+          continue;
+        }
+
         try {
           makingOfferRef.current.set(peer.socketId, true);
           const offer = await pc.createOffer();
@@ -522,22 +800,81 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   const toggleScreenShare = async () => {
     if (isScreenSharing) {
       screenStream?.getTracks().forEach(t => t.stop());
+      // Remove screen share senders from all active peer connections
+      peerConnectionsRef.current.forEach((pc, sid) => {
+        const senders = screenShareSendersRef.current.get(sid) || [];
+        senders.forEach(s => {
+          try { pc.removeTrack(s); } catch (_) {}
+        });
+        screenShareSendersRef.current.delete(sid);
+      });
       setScreenStream(null);
       setIsScreenSharing(false);
+      await renegotiateAllPeers();
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30 }
+        },
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        }
+      });
       setScreenStream(stream);
       setIsScreenSharing(true);
+
+      // Add screen share tracks to all active peer connections so the partner receives them
+      peerConnectionsRef.current.forEach((pc, sid) => {
+        const addedSenders: RTCRtpSender[] = [];
+        stream.getTracks().forEach(track => {
+          try {
+            const sender = pc.addTrack(track, stream);
+            addedSenders.push(sender);
+            console.log(`[WebRTC] Added screen share ${track.kind} track to peer ${sid}`);
+          } catch (e) {
+            console.warn('[WebRTC] Error adding screen share track to PC:', e);
+          }
+        });
+        screenShareSendersRef.current.set(sid, addedSenders);
+      });
+
+      // Send renegotiation offer to partner so they receive the new stream
+      await renegotiateAllPeers();
+
+      // Check if user shared audio
       const audioTrack = stream.getAudioTracks()[0];
-      if (audioTrack) registerRemoteScreenShareTrack('screen-share', audioTrack);
-      stream.getVideoTracks()[0].onended = () => {
-        setIsScreenSharing(false);
-        setScreenStream(null);
-      };
+      if (audioTrack) {
+        console.log('[Media] Screen share captured with system/tab audio successfully!');
+      } else {
+        alert('Notice: No audio track detected from screen share.\n\nTip: In the Chrome screen share popup, make sure to select "Chrome Tab" (Spotify tab) and check the "Also share tab audio" checkbox at the bottom left!');
+      }
+
+      // Handle user clicking native browser "Stop sharing" bar
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.onended = async () => {
+          console.log('[Media] Screen sharing stopped by user');
+          stream.getTracks().forEach(t => t.stop());
+          peerConnectionsRef.current.forEach((pc, sid) => {
+            const senders = screenShareSendersRef.current.get(sid) || [];
+            senders.forEach(s => {
+              try { pc.removeTrack(s); } catch (_) {}
+            });
+            screenShareSendersRef.current.delete(sid);
+          });
+          setScreenStream(null);
+          setIsScreenSharing(false);
+          await renegotiateAllPeers();
+        };
+      }
     } catch (e) {
-      console.warn('[Media] Screen share cancelled:', e);
+      console.warn('[Media] Screen share cancelled or error:', e);
     }
   };
 
@@ -650,6 +987,23 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden relative">
+        {/* Permanent hidden music audio element */}
+        <audio ref={musicAudioRef} playsInline preload="auto" crossOrigin="anonymous" className="hidden" />
+
+        {autoplayBlocked && (
+          <button
+            onClick={() => {
+              if (musicAudioRef.current) {
+                musicAudioRef.current.play().then(() => setAutoplayBlocked(false)).catch(() => {});
+              }
+            }}
+            className="absolute top-2 left-1/2 -translate-x-1/2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs px-4 py-2 rounded-full font-bold shadow-xl z-50 animate-bounce flex items-center gap-2 border border-fuchsia-400"
+          >
+            <Music size={14} />
+            <span>Click here to enable shared music sound 🔊</span>
+          </button>
+        )}
+
         <div className="flex-1 flex flex-col relative justify-center bg-black/20 p-6 overflow-hidden">
 
           <ReactionOverlay />
@@ -695,16 +1049,34 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
               </div>
             )}
 
-            {/* Remote Peer Videos */}
-            {remotePeerList.map(peer => (
-              <div key={peer.socketId} className="bg-[#18181b] aspect-video rounded-3xl overflow-hidden border border-white/10 relative shadow-2xl flex items-center justify-center">
-                <RemoteVideoPlayer stream={peer.stream} />
-                <span className="absolute bottom-4 left-4 text-xs font-semibold bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm flex items-center gap-1.5 z-10">
-                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                  {peer.username}
-                </span>
-              </div>
-            ))}
+            {/* Remote Peer Videos & Remote Screen Shares */}
+            {remotePeerList.flatMap(peer => {
+              const videoTracks = peer.stream.getVideoTracks();
+              if (videoTracks.length <= 1) {
+                return [
+                  <div key={peer.socketId} className="bg-[#18181b] aspect-video rounded-3xl overflow-hidden border border-white/10 relative shadow-2xl flex items-center justify-center">
+                    <RemoteVideoPlayer stream={peer.stream} />
+                    <span className="absolute bottom-4 left-4 text-xs font-semibold bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm flex items-center gap-1.5 z-10">
+                      <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                      {peer.username}
+                    </span>
+                  </div>
+                ];
+              }
+              return videoTracks.map((track, idx) => {
+                const singleStream = new MediaStream([track, ...peer.stream.getAudioTracks()]);
+                const isScreen = idx > 0;
+                return (
+                  <div key={`${peer.socketId}_${track.id}`} className={`bg-[#18181b] aspect-video rounded-3xl overflow-hidden ${isScreen ? 'border border-emerald-500/30' : 'border border-white/10'} relative shadow-2xl flex items-center justify-center`}>
+                    <RemoteVideoPlayer stream={singleStream} />
+                    <span className={`absolute bottom-4 left-4 text-xs font-semibold ${isScreen ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/30' : 'bg-black/60 text-white border-white/10'} px-3 py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 z-10`}>
+                      {isScreen ? <Tv size={14} /> : <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />}
+                      {peer.username} {isScreen ? "'s Screen Share" : ''}
+                    </span>
+                  </div>
+                );
+              });
+            })}
 
             {/* Waiting placeholder (only when no remote peers) */}
             {remotePeerList.length === 0 && (
@@ -785,7 +1157,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
         {/* Sidebars */}
         {activeSidebar === 'chat' && <ChatSidebar />}
-        {activeSidebar === 'music' && <PlaylistSidebar />}
+        {activeSidebar === 'music' && <PlaylistSidebar onStartScreenShare={toggleScreenShare} />}
         {activeSidebar === 'mixer' && <AudioMixerPanel />}
       </div>
     </div>

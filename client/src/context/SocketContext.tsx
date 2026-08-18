@@ -28,7 +28,7 @@ interface MusicState {
     artist: string;
     url: string;
     duration: number;
-    isRoyaltyFree: boolean;
+    isRoyaltyFree?: boolean;
   } | null;
 }
 
@@ -38,7 +38,12 @@ interface SocketContextType {
   joinRoom: (roomId: string, userId: string, username: string) => void;
   sendChatMessage: (message: string) => void;
   sendReaction: (emoji: string) => void;
-  sendMusicAction: (action: 'play' | 'pause' | 'seek' | 'change', trackId?: string | null, position?: number) => void;
+  sendMusicAction: (
+    action: 'play' | 'pause' | 'seek' | 'change',
+    trackId?: string | null,
+    position?: number,
+    trackData?: { id: string; title: string; artist: string; url: string; duration: number; isRoyaltyFree?: boolean } | null
+  ) => void;
   chatMessages: ChatMessage[];
   participants: Participant[];
   musicState: MusicState;
@@ -204,6 +209,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       trackId: string | null;
       position?: number;
       isPlaying?: boolean;
+      trackData?: any;
       timestamp: number;
     }) => {
       setMusicState(prev => {
@@ -211,6 +217,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (payload.trackId !== undefined) next.currentTrackId = payload.trackId;
         if (payload.isPlaying !== undefined) next.isPlaying = payload.isPlaying;
         if (payload.position !== undefined) next.lastPosition = payload.position;
+        if (payload.trackData !== undefined) next.currentTrack = payload.trackData;
         next.lastPositionUpdatedAt = payload.timestamp;
         if (payload.action === 'change') {
           next.isPlaying = false;
@@ -264,13 +271,15 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const sendMusicAction = useCallback((
     action: 'play' | 'pause' | 'seek' | 'change',
     trackId?: string | null,
-    position?: number
+    position?: number,
+    trackData?: { id: string; title: string; artist: string; url: string; duration: number; isRoyaltyFree?: boolean } | null
   ) => {
     const sock = socketRef.current;
     if (!sock || !roomIdRef.current) return;
 
     setMusicState(prev => {
       const next = { ...prev };
+      if (trackData !== undefined) next.currentTrack = trackData;
       if (action === 'change' && trackId !== undefined) {
         next.currentTrackId = trackId;
         next.isPlaying = false;
@@ -293,6 +302,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       action,
       trackId,
       position,
+      trackData,
       timestamp: Date.now()
     });
   }, []);

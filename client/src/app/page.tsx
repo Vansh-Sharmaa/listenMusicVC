@@ -22,7 +22,7 @@ export default function Home() {
 
   const [mounted, setMounted] = useState(false);
 
-  // Generate or restore tab-unique userId & username on mount
+  // Generate or restore tab-unique userId & username on mount, plus rejoin active call if reloaded
   useEffect(() => {
     setMounted(true);
     let uid = sessionStorage.getItem('lmvc_userid');
@@ -32,7 +32,7 @@ export default function Home() {
     }
     setUserId(uid);
 
-    let savedName = sessionStorage.getItem('lmvc_username');
+    let savedName = sessionStorage.getItem('lmvc_username') || localStorage.getItem('lmvc_username');
     if (!savedName) {
       // Default to tab-unique nickname so side-by-side tabs don't clash
       savedName = 'User_' + Math.floor(Math.random() * 899 + 100);
@@ -42,7 +42,21 @@ export default function Home() {
     // Auto detect room from URL query param ?room=xyz
     const params = new URLSearchParams(window.location.search);
     const roomParam = params.get('room');
-    if (roomParam) {
+    
+    // Check if user was already in a call before reloading
+    const wasJoined = sessionStorage.getItem('lmvc_joined') === 'true';
+    const savedActiveRoom = sessionStorage.getItem('lmvc_active_room') || roomParam;
+
+    if (wasJoined && savedActiveRoom) {
+      const savedToken = sessionStorage.getItem('lmvc_token') || `mock-token-${savedActiveRoom}-${uid}`;
+      const savedLivekitUrl = sessionStorage.getItem('lmvc_livekitUrl') || 'mock://localhost:7880';
+      setRoomId(savedActiveRoom);
+      setActiveRoomId(savedActiveRoom);
+      setToken(savedToken);
+      setLivekitUrl(savedLivekitUrl);
+      setIsMock(true);
+      setJoined(true);
+    } else if (roomParam) {
       setRoomId(roomParam);
       setIsCreating(false);
     }
@@ -97,37 +111,60 @@ export default function Home() {
           setToken(tokenData.token);
           setLivekitUrl(tokenData.url);
           setIsMock(tokenData.isMock);
+          sessionStorage.setItem('lmvc_token', tokenData.token);
+          sessionStorage.setItem('lmvc_livekitUrl', tokenData.url);
         } else {
           // Graceful fallback token
-          setToken(`mock-token-${resolvedRoomId}-${userId}`);
+          const fallbackTok = `mock-token-${resolvedRoomId}-${userId}`;
+          setToken(fallbackTok);
           setLivekitUrl('mock://localhost:7880');
           setIsMock(true);
+          sessionStorage.setItem('lmvc_token', fallbackTok);
+          sessionStorage.setItem('lmvc_livekitUrl', 'mock://localhost:7880');
         }
       } catch (err) {
         console.warn('Backend server not directly reachable, entering fallback WebRTC call mode:', err);
-        // Never leave user hanging - generate instant fallback token
-        setToken(`mock-token-${resolvedRoomId}-${userId}`);
+        const fallbackTok = `mock-token-${resolvedRoomId}-${userId}`;
+        setToken(fallbackTok);
         setLivekitUrl('mock://localhost:7880');
         setIsMock(true);
+        sessionStorage.setItem('lmvc_token', fallbackTok);
+        sessionStorage.setItem('lmvc_livekitUrl', 'mock://localhost:7880');
       } finally {
         clearTimeout(timeoutId);
       }
       
       setRoomId(resolvedRoomId);
       setActiveRoomId(resolvedRoomId);
+      sessionStorage.setItem('lmvc_joined', 'true');
+      sessionStorage.setItem('lmvc_active_room', resolvedRoomId);
+      window.history.replaceState(null, '', `?room=${encodeURIComponent(resolvedRoomId)}`);
       setJoined(true);
     } catch (error: any) {
       console.error('Failed to join call:', error);
       const fallbackRoom = rawTarget.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-') || 'room';
       setRoomId(fallbackRoom);
       setActiveRoomId(fallbackRoom);
-      setToken(`mock-token-${fallbackRoom}-${userId}`);
+      const fallbackTok = `mock-token-${fallbackRoom}-${userId}`;
+      setToken(fallbackTok);
       setLivekitUrl('mock://localhost:7880');
       setIsMock(true);
+      sessionStorage.setItem('lmvc_joined', 'true');
+      sessionStorage.setItem('lmvc_active_room', fallbackRoom);
+      sessionStorage.setItem('lmvc_token', fallbackTok);
+      sessionStorage.setItem('lmvc_livekitUrl', 'mock://localhost:7880');
+      window.history.replaceState(null, '', `?room=${encodeURIComponent(fallbackRoom)}`);
       setJoined(true);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleLeaveCall = () => {
+    sessionStorage.removeItem('lmvc_joined');
+    sessionStorage.removeItem('lmvc_active_room');
+    sessionStorage.removeItem('lmvc_token');
+    setJoined(false);
   };
 
   if (joined) {
@@ -141,7 +178,7 @@ export default function Home() {
             token={token}
             livekitUrl={livekitUrl}
             isMock={isMock}
-            onLeave={() => setJoined(false)}
+            onLeave={handleLeaveCall}
           />
         </AudioMixerProvider>
       </SocketProvider>

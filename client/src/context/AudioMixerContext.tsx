@@ -24,6 +24,8 @@ interface AudioMixerContextType {
   registerRemoteScreenShareTrack: (trackId: string, track: MediaStreamTrack) => void;
   unregisterRemoteScreenShareTrack: (trackId: string) => void;
   processLocalMicTrack: (track: MediaStreamTrack) => Promise<MediaStreamTrack>;
+  /** Returns the music output as a MediaStreamTrack so it can be sent over WebRTC to the partner. */
+  getMusicTrack: () => MediaStreamTrack | null;
   isSpeaking: boolean;
   audioContext: AudioContext | null;
 }
@@ -70,6 +72,8 @@ export const AudioMixerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const localMicSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const localMicDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const musicSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  // Destination node that captures music output as a MediaStreamTrack for WebRTC
+  const musicDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
 
   // Hold timer for speech detection
   const speechEndTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -122,9 +126,14 @@ export const AudioMixerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     voiceAnalyser.connect(voiceGain);
     voiceGain.connect(ctx.destination);
 
-    // Connect music path: source -> musicGain -> duckingGain -> destination
+    // Create a MediaStreamDestinationNode to capture music as a WebRTC-sendable track
+    const musicDest = ctx.createMediaStreamDestination();
+    musicDestinationRef.current = musicDest;
+
+    // Connect music path: source -> musicGain -> duckingGain -> destination AND musicDest (for WebRTC)
     musicGain.connect(duckingGain);
     duckingGain.connect(ctx.destination);
+    duckingGain.connect(musicDest); // also pipe to the WebRTC capture destination
 
     // Connect screen share path: sources -> screenShareGain -> destination
     screenShareGain.connect(ctx.destination);
@@ -199,6 +208,16 @@ export const AudioMixerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   };
 
+  /**
+   * Returns the music output as a MediaStreamTrack.
+   * This track can be added to RTCPeerConnections so the partner hears the music over WebRTC.
+   */
+  const getMusicTrack = (): MediaStreamTrack | null => {
+    if (!musicDestinationRef.current) return null;
+    const tracks = musicDestinationRef.current.stream.getAudioTracks();
+    return tracks.length > 0 ? tracks[0] : null;
+  };
+
   // Register a remote participant's voice track
   const registerRemoteVoiceTrack = (trackId: string, track: MediaStreamTrack) => {
     if (!audioContextRef.current) initAudio();
@@ -219,14 +238,15 @@ export const AudioMixerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   };
 
-  const unregisterRemoteVoiceTrack = (trackId: string) => {
-    const source = remoteVoiceSourcesRef.current.get(trackId);
-    if (source) {
-      try {
-        source.disconnect();
-      } catch (e) {}
-      remoteVoiceSourcesRef.current.delete(trackId);
-      console.log(`Unregistered remote voice track: ${trackId}`);
+  const unregisterRemoteVoiceTrack = (trackIdOrPrefix: string) => {
+    for (const [key, source] of remoteVoiceSourcesRef.current.entries()) {
+      if (key === trackIdOrPrefix || key.startsWith(trackIdOrPrefix)) {
+        try {
+          source.disconnect();
+        } catch (e) {}
+        remoteVoiceSourcesRef.current.delete(key);
+        console.log(`Unregistered remote voice track: ${key}`);
+      }
     }
   };
 
@@ -250,14 +270,15 @@ export const AudioMixerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   };
 
-  const unregisterRemoteScreenShareTrack = (trackId: string) => {
-    const source = remoteScreenShareSourcesRef.current.get(trackId);
-    if (source) {
-      try {
-        source.disconnect();
-      } catch (e) {}
-      remoteScreenShareSourcesRef.current.delete(trackId);
-      console.log(`Unregistered screen share audio track: ${trackId}`);
+  const unregisterRemoteScreenShareTrack = (trackIdOrPrefix: string) => {
+    for (const [key, source] of remoteScreenShareSourcesRef.current.entries()) {
+      if (key === trackIdOrPrefix || key.startsWith(trackIdOrPrefix)) {
+        try {
+          source.disconnect();
+        } catch (e) {}
+        remoteScreenShareSourcesRef.current.delete(key);
+        console.log(`Unregistered screen share audio track: ${key}`);
+      }
     }
   };
 
@@ -384,6 +405,7 @@ export const AudioMixerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         duckingAmount,
         setDuckingAmount,
         registerMusicElement,
+        getMusicTrack,
         registerRemoteVoiceTrack,
         unregisterRemoteVoiceTrack,
         registerRemoteScreenShareTrack,

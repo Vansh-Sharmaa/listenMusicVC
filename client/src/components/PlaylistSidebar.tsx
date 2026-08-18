@@ -14,9 +14,13 @@ interface MusicTrack {
   isRoyaltyFree: boolean;
 }
 
-export const PlaylistSidebar: React.FC = () => {
-  const { musicState, sendMusicAction, getServerTime } = useSocket();
-  const { registerMusicElement, registerRemoteScreenShareTrack } = useAudioMixer();
+interface PlaylistSidebarProps {
+  onStartScreenShare?: () => void;
+}
+
+export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenShare }) => {
+  const { musicState, sendMusicAction } = useSocket();
+  const { registerRemoteScreenShareTrack } = useAudioMixer();
 
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
   const [loading, setLoading] = useState(true);
@@ -105,107 +109,30 @@ export const PlaylistSidebar: React.FC = () => {
     fetchTracks();
   }, []);
 
-  // Hook audio element into Web Audio Mixer
-  useEffect(() => {
-    if (audioRef.current) {
-      registerMusicElement(audioRef.current);
-    }
-  }, [audioRef.current]);
-
-  // Synchronize audio playback across clients using NTP offset
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || !musicState.currentTrackId) return;
-
-    const activeTrack = tracks.find(t => t.id === musicState.currentTrackId);
-    if (!activeTrack) {
-      fetchTracks();
-      return;
-    }
-
-    const serverUrl = (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '');
-    let trackSrc = activeTrack.url;
-    if (trackSrc.startsWith('/')) {
-      trackSrc = `${serverUrl}${trackSrc}`;
-    }
-    
-    if (audio.src !== trackSrc) {
-      audio.src = trackSrc;
-      audio.load();
-    }
-
-    // Playback sync handler
-    const syncAudio = async () => {
-      if (isSyncingRef.current) return;
-      isSyncingRef.current = true;
-
-      try {
-        if (musicState.isPlaying) {
-          const elapsed = (getServerTime() - Number(musicState.lastPositionUpdatedAt)) / 1000;
-          const targetPos = Math.max(0, musicState.lastPosition + elapsed);
-
-          if (Math.abs(audio.currentTime - targetPos) > 0.6) {
-            audio.currentTime = targetPos;
-          }
-
-          if (audio.paused) {
-            await audio.play();
-          }
-        } else {
-          if (!audio.paused) {
-            audio.pause();
-          }
-          if (Math.abs(audio.currentTime - musicState.lastPosition) > 0.6) {
-            audio.currentTime = musicState.lastPosition;
-          }
-        }
-      } catch (err) {
-        console.warn('Audio sync play exception:', err);
-      } finally {
-        isSyncingRef.current = false;
-      }
-    };
-
-    syncAudio();
-    const interval = setInterval(syncAudio, 2000);
-    return () => clearInterval(interval);
-  }, [musicState, tracks]);
-
   // Toggle play/pause
+  const activeTrack = tracks.find(t => t.id === musicState.currentTrackId) || musicState.currentTrack;
+
   const handlePlayPause = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
+    const currentPos = musicState.lastPosition || 0;
 
     if (musicState.isPlaying) {
-      sendMusicAction('pause', musicState.currentTrackId, audio.currentTime);
+      sendMusicAction('pause', musicState.currentTrackId, currentPos, activeTrack);
     } else {
-      sendMusicAction('play', musicState.currentTrackId, audio.currentTime);
+      sendMusicAction('play', musicState.currentTrackId, currentPos, activeTrack);
     }
   };
 
   const handleTrackSelect = (track: MusicTrack) => {
-    sendMusicAction('change', track.id, 0);
+    sendMusicAction('change', track.id, 0, track);
     setTimeout(() => {
-      sendMusicAction('play', track.id, 0);
+      sendMusicAction('play', track.id, 0, track);
     }, 100);
   };
 
   // Capture Spotify / System Audio Screen Share
-  const handleShareSpotifyAudio = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: true
-      });
-      const audioTrack = stream.getAudioTracks()[0];
-      if (audioTrack) {
-        registerRemoteScreenShareTrack('spotify-audio', audioTrack);
-        alert('Spotify / System Audio connected! Your music will stream to the call with auto-ducking.');
-      } else {
-        alert('No audio track selected. Make sure to check "Share audio" when picking your tab/screen.');
-      }
-    } catch (e) {
-      console.warn('System audio capture cancelled:', e);
+  const handleShareSpotifyAudio = () => {
+    if (onStartScreenShare) {
+      onStartScreenShare();
     }
   };
 
@@ -293,13 +220,8 @@ export const PlaylistSidebar: React.FC = () => {
     }
   };
 
-  const activeTrack = tracks.find(t => t.id === musicState.currentTrackId);
-
   return (
     <div className="flex flex-col h-full bg-black/40 border-l border-white/10 backdrop-blur-md text-white w-80">
-      {/* Hidden audio element */}
-      <audio ref={audioRef} crossOrigin="anonymous" className="hidden" />
-
       {/* Header */}
       <div className="p-4 border-b border-white/10 flex justify-between items-center">
         <div className="flex items-center gap-2">

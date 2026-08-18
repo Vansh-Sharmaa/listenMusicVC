@@ -158,8 +158,9 @@ export function setupSockets(io: Server) {
       trackId?: string | null;
       position?: number;
       timestamp: number;
+      trackData?: any;
     }) => {
-      const { roomId, action, trackId, position, timestamp } = payload;
+      const { roomId, action, trackId, position, timestamp, trackData } = payload;
       console.log(`Music action in room ${roomId}: ${action} (trackId: ${trackId}, position: ${position})`);
 
       try {
@@ -192,6 +193,7 @@ export function setupSockets(io: Server) {
           trackId: updatedState?.currentTrackId || trackId,
           position: updatedState?.lastPosition !== undefined ? updatedState.lastPosition : position,
           isPlaying: updatedState?.isPlaying,
+          trackData: trackData || updatedState?.currentTrack,
           timestamp: Date.now() // server's reference time for synchronization
         });
 
