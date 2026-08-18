@@ -61,7 +61,7 @@ export default function Home() {
     sessionStorage.setItem('lmvc_username', username);
     localStorage.setItem('lmvc_username', username);
 
-    const serverUrl = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
+    const serverUrl = (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '');
 
     try {
       const slug = rawTarget.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-') || 'room';

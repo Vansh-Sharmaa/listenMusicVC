@@ -76,10 +76,10 @@ export const PlaylistSidebar: React.FC = () => {
     }
   ];
 
-  // Fetch track list from backend
   const fetchTracks = async () => {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001'}/api/music`);
+      const serverUrl = (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '');
+      const res = await fetch(`${serverUrl}/api/music`);
       if (res.ok) {
         const dbTracks = await res.json();
         // Merge preset online tracks with DB tracks
@@ -123,7 +123,7 @@ export const PlaylistSidebar: React.FC = () => {
       return;
     }
 
-    const serverUrl = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
+    const serverUrl = (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '');
     let trackSrc = activeTrack.url;
     if (trackSrc.startsWith('/')) {
       trackSrc = `${serverUrl}${trackSrc}`;
@@ -215,7 +215,7 @@ export const PlaylistSidebar: React.FC = () => {
     if (!onlineUrl.trim() || !onlineTitle.trim()) return;
 
     setSubmitting(true);
-    const serverUrl = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
+    const serverUrl = (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '');
 
     try {
       const response = await fetch(`${serverUrl}/api/music/upload`, {
@@ -263,7 +263,7 @@ export const PlaylistSidebar: React.FC = () => {
     if (!uploadFile || !uploadTitle.trim()) return;
 
     setSubmitting(true);
-    const serverUrl = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
+    const serverUrl = (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '');
 
     try {
       const fileData = await uploadFile.arrayBuffer();

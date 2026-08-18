@@ -88,7 +88,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   useEffect(() => {
-    const socketUrl = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
+    const socketUrl = (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '');
     console.log(`[Socket] Connecting to ${socketUrl}`);
 
     const sock = io(socketUrl, {
