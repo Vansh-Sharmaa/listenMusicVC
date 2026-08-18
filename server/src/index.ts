@@ -64,7 +64,7 @@ try {
 app.use('/api', apiRouter);
 
 // Basic health check route
-app.get('/health', (req, res) => {
+app.get('/health', (req: express.Request, res: express.Response) => {
   res.json({ status: 'OK', env: process.env.NODE_ENV || 'development' });
 });
 
