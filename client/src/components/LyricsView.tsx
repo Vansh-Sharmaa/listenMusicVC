@@ -216,7 +216,7 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
       window.removeEventListener('resize', updateGeometryCache);
       if (ro) ro.disconnect();
     };
-  }, [cleanLines, updateGeometryCache]);
+  }, [cleanLines, showPronunciation, showTranslation, updateGeometryCache]);
 
   // ─── Single Unified High-Resolution RAF Loop (am-lyrics Engine) ───────────
   useEffect(() => {
@@ -276,17 +276,17 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
 
           if (cur === -1) {
             if (i === 0) {
-              lineEl.style.opacity = '0.75';
+              lineEl.style.opacity = '0.80';
               lineEl.style.transform = 'scale(1.0) translate3d(0, 0, 0)';
               lineEl.style.filter = 'none';
             } else if (i === 1) {
               lineEl.style.opacity = '0.45';
               lineEl.style.transform = 'scale(0.98) translate3d(0, 3px, 0)';
-              lineEl.style.filter = 'blur(1.5px)';
+              lineEl.style.filter = 'none';
             } else {
               lineEl.style.opacity = '0.18';
               lineEl.style.transform = 'scale(0.95) translate3d(0, 6px, 0)';
-              lineEl.style.filter = 'blur(3.5px)';
+              lineEl.style.filter = 'none';
             }
             continue;
           }
@@ -299,22 +299,22 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
             lineEl.style.filter = 'none';
           } else if (dist === -1) {
             // Immediately previous line (pulled upward)
-            lineEl.style.opacity = '0.50';
+            lineEl.style.opacity = '0.45';
             lineEl.style.transform = 'scale(0.98) translate3d(0, -3px, 0)';
-            lineEl.style.filter = 'blur(1.2px)';
+            lineEl.style.filter = 'none';
           } else if (dist === 1) {
             // Next incoming line (gliding upward from bottom)
-            lineEl.style.opacity = '0.50';
+            lineEl.style.opacity = '0.45';
             lineEl.style.transform = 'scale(0.98) translate3d(0, 3px, 0)';
-            lineEl.style.filter = 'blur(1.2px)';
+            lineEl.style.filter = 'none';
           } else if (dist === 2) {
-            lineEl.style.opacity = '0.28';
+            lineEl.style.opacity = '0.22';
             lineEl.style.transform = 'scale(0.96) translate3d(0, 6px, 0)';
-            lineEl.style.filter = 'blur(2.8px)';
+            lineEl.style.filter = 'none';
           } else {
-            lineEl.style.opacity = '0.14';
+            lineEl.style.opacity = '0.10';
             lineEl.style.transform = `scale(0.94) translate3d(0, ${dist > 0 ? '9px' : '-6px'}, 0)`;
-            lineEl.style.filter = 'blur(4px)';
+            lineEl.style.filter = 'none';
           }
         }
       }
@@ -676,8 +676,9 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
                   >
                     {/* Pronunciation / Romanization Guide (Above Main Line) */}
                     {showPronunciation && line.romanizedText && (
-                      <div className="text-[11px] sm:text-xs font-semibold uppercase tracking-wider opacity-65 mb-0.5 text-fuchsia-300/80 select-none">
-                        {line.romanizedText}
+                      <div className="text-xs sm:text-[13px] font-semibold tracking-wide text-fuchsia-300/90 mb-1 select-none flex items-center gap-1.5 opacity-90">
+                        <span className="text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30">Romaji</span>
+                        <span className="tracking-wide">{line.romanizedText}</span>
                       </div>
                     )}
 
