@@ -318,8 +318,32 @@ apiRouter.get('/music/search', async (req: Request, res: Response) => {
   return res.json(results);
 });
 
-// GET /api/lyrics - Fetch synchronized LRC lyrics (LRCLIB Integration)
+// GET /api/lyrics - Fetch synchronized LRC lyrics (LRCLIB Integration & Custom URL Proxy)
 apiRouter.get('/lyrics', async (req: Request, res: Response) => {
+  const customUrl = (req.query.customUrl as string || '').trim();
+
+  // If user provided a direct custom lyrics URL (e.g. Pastebin, GitHub raw, LRC link)
+  if (customUrl) {
+    try {
+      const response = await fetch(customUrl);
+      if (!response.ok) {
+        return res.status(response.status).json({ error: `Failed to fetch from custom URL (${response.statusText})` });
+      }
+      const text = await response.text();
+      const isTtml = text.includes('<tt') || (text.includes('<p') && text.includes('begin='));
+      return res.json({
+        trackName: 'Custom Track',
+        artistName: 'Custom Artist',
+        plainLyrics: text.replace(/<[^>]+>/g, '').replace(/\[\d{2}:\d{2}\.?\d*\]/g, '').trim(),
+        syncedLyrics: text,
+        format: isTtml ? 'ttml' : 'lrc'
+      });
+    } catch (fetchErr: any) {
+      console.warn('[Lyrics API] Custom URL fetch error:', fetchErr);
+      return res.status(500).json({ error: 'Failed to fetch custom lyrics URL: ' + (fetchErr?.message || 'Network error') });
+    }
+  }
+
   const trackName = (req.query.title as string || '').trim();
   const artistName = (req.query.artist as string || '').trim();
   const duration = req.query.duration ? parseInt(req.query.duration as string, 10) : undefined;

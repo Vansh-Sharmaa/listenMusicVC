@@ -441,7 +441,43 @@ export function parseLRC(lrcText: string): LyricLine[] {
 const lyricsCache = new Map<string, LyricsData>();
 
 /**
- * Fetch lyrics for a track from the server / LRCLIB
+ * Save custom user-provided lyrics (LRC or TTML or plain text) for a track
+ */
+export function saveCustomLyrics(title: string, artist: string = '', rawContent: string): LyricsData {
+  const cacheKey = `${title.toLowerCase()}_${artist.toLowerCase()}`;
+  const isTtml = rawContent.includes('<tt') || (rawContent.includes('<p') && rawContent.includes('begin='));
+  const parsed = isTtml ? parseTTML(rawContent) : parseLRC(rawContent);
+
+  const lyricsData: LyricsData = {
+    synced: parsed.length > 0 && parsed.some(l => l.time > 0),
+    lines: parsed
+  };
+
+  lyricsCache.set(cacheKey, lyricsData);
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(`custom_lyrics_${cacheKey}`, rawContent);
+    } catch (_) {}
+  }
+
+  return lyricsData;
+}
+
+/**
+ * Clear custom lyrics for a track
+ */
+export function clearCustomLyrics(title: string, artist: string = ''): void {
+  const cacheKey = `${title.toLowerCase()}_${artist.toLowerCase()}`;
+  lyricsCache.delete(cacheKey);
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem(`custom_lyrics_${cacheKey}`);
+    } catch (_) {}
+  }
+}
+
+/**
+ * Fetch lyrics for a track from the server / LRCLIB or custom localStorage
  */
 export async function fetchLyrics(
   title: string,
@@ -449,6 +485,17 @@ export async function fetchLyrics(
   duration?: number
 ): Promise<LyricsData | null> {
   const cacheKey = `${title.toLowerCase()}_${artist.toLowerCase()}`;
+
+  // 1. Check custom saved lyrics in localStorage first
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = localStorage.getItem(`custom_lyrics_${cacheKey}`);
+      if (saved) {
+        return saveCustomLyrics(title, artist, saved);
+      }
+    } catch (_) {}
+  }
+
   if (lyricsCache.has(cacheKey)) {
     return lyricsCache.get(cacheKey)!;
   }

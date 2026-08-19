@@ -12,9 +12,9 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { fetchLyrics, LyricsData, LyricLine } from '../utils/lyrics';
+import { fetchLyrics, saveCustomLyrics, clearCustomLyrics, LyricsData, LyricLine } from '../utils/lyrics';
 import { extractPaletteFromImage, SongColorPalette } from '../utils/colorExtractor';
-import { Mic2, Loader2, Music2, Disc, RotateCcw, Minus, Plus } from 'lucide-react';
+import { Mic2, Loader2, Music2, Disc, RotateCcw, Minus, Plus, Link as LinkIcon, FileText, Upload, Check, AlertCircle, Trash2 } from 'lucide-react';
 
 export interface LyricsViewProps {
   currentTrack?: {
@@ -60,6 +60,16 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
   const [songPalette, setSongPalette] = useState<SongColorPalette | null>(null);
   const [showPronunciation, setShowPronunciation] = useState<boolean>(true);
   const [showTranslation, setShowTranslation] = useState<boolean>(true);
+
+  // Custom Lyrics Modal state
+  const [showCustomModal, setShowCustomModal] = useState<boolean>(false);
+  const [customMode, setCustomMode] = useState<'url' | 'paste' | 'upload'>('url');
+  const [customUrlInput, setCustomUrlInput] = useState<string>('');
+  const [customTextInput, setCustomTextInput] = useState<string>('');
+  const [customLoading, setCustomLoading] = useState<boolean>(false);
+  const [customError, setCustomError] = useState<string>('');
+  const [customSuccess, setCustomSuccess] = useState<string>('');
+  const [hasCustomLyrics, setHasCustomLyrics] = useState<boolean>(false);
 
   // High-precision clock extrapolation
   const lastAuthoritativeTimeRef = useRef<{ time: number; perfNow: number }>({
@@ -143,6 +153,102 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
       });
     return () => { isMounted = false; };
   }, [currentTrack?.title, currentTrack?.artist]);
+
+  // Check if custom lyrics are saved for this song
+  useEffect(() => {
+    if (typeof window !== 'undefined' && currentTrack) {
+      const cacheKey = `${currentTrack.title.toLowerCase()}_${(currentTrack.artist || '').toLowerCase()}`;
+      setHasCustomLyrics(Boolean(localStorage.getItem(`custom_lyrics_${cacheKey}`)));
+    }
+  }, [currentTrack?.title, currentTrack?.artist]);
+
+  // Load custom lyrics from direct URL (e.g. Pastebin, GitHub raw, LRC link)
+  const handleLoadCustomUrl = async () => {
+    if (!customUrlInput.trim() || !currentTrack) return;
+    setCustomLoading(true);
+    setCustomError('');
+    setCustomSuccess('');
+
+    try {
+      const serverUrl = (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '');
+      const res = await fetch(`${serverUrl}/api/lyrics?customUrl=${encodeURIComponent(customUrlInput.trim())}`);
+      if (!res.ok) {
+        throw new Error(`Failed to fetch from link (${res.status})`);
+      }
+      const data = await res.json();
+      if (!data.syncedLyrics && !data.plainLyrics) {
+        throw new Error('No readable lyrics found at that link.');
+      }
+
+      const raw = data.syncedLyrics || data.plainLyrics;
+      const saved = saveCustomLyrics(currentTrack.title, currentTrack.artist, raw);
+      setLyricsData(saved);
+      setHasCustomLyrics(true);
+      setCustomSuccess('Custom lyrics loaded and synced!');
+      setTimeout(() => {
+        setShowCustomModal(false);
+        setCustomSuccess('');
+      }, 700);
+    } catch (err: any) {
+      console.warn('[CustomLyrics] URL fetch failed:', err);
+      setCustomError(err?.message || 'Could not fetch lyrics from that link.');
+    } finally {
+      setCustomLoading(false);
+    }
+  };
+
+  // Load custom lyrics from pasted text
+  const handleLoadCustomText = () => {
+    if (!customTextInput.trim() || !currentTrack) return;
+    try {
+      const saved = saveCustomLyrics(currentTrack.title, currentTrack.artist, customTextInput.trim());
+      setLyricsData(saved);
+      setHasCustomLyrics(true);
+      setCustomSuccess('Lyrics saved and active!');
+      setTimeout(() => {
+        setShowCustomModal(false);
+        setCustomSuccess('');
+      }, 500);
+    } catch (err: any) {
+      setCustomError('Failed to parse lyrics: ' + err.message);
+    }
+  };
+
+  // Load custom lyrics from file upload (.lrc, .ttml, .txt)
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentTrack) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        const saved = saveCustomLyrics(currentTrack.title, currentTrack.artist, content);
+        setLyricsData(saved);
+        setHasCustomLyrics(true);
+        setCustomSuccess(`Loaded ${file.name} successfully!`);
+        setTimeout(() => {
+          setShowCustomModal(false);
+          setCustomSuccess('');
+        }, 500);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // Reset custom lyrics and restore default server search
+  const handleResetCustomLyrics = () => {
+    if (!currentTrack) return;
+    clearCustomLyrics(currentTrack.title, currentTrack.artist);
+    setHasCustomLyrics(false);
+    setLoading(true);
+    fetchLyrics(currentTrack.title, currentTrack.artist, currentTrack.duration)
+      .then((data) => {
+        setLyricsData(data);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+    setShowCustomModal(false);
+  };
 
   // Clean lines: keep valid lines and deduplicate consecutive duplicates
   const cleanLines = useMemo(() => {
@@ -579,6 +685,20 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
             </button>
           )}
 
+          {/* Custom Lyrics / Link Button */}
+          <button
+            onClick={() => setShowCustomModal(true)}
+            className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all active:scale-95 flex items-center gap-1 ${
+              hasCustomLyrics
+                ? 'bg-emerald-600/80 border-emerald-500 text-white shadow-sm'
+                : 'bg-white/10 border-white/10 text-white/60 hover:text-white hover:bg-white/20'
+            }`}
+            title={hasCustomLyrics ? 'Custom lyrics active (Click to edit or remove)' : 'Add custom lyrics, paste text, or load link for this song'}
+          >
+            <LinkIcon size={10} />
+            <span>{hasCustomLyrics ? 'Custom' : '+ Lyrics'}</span>
+          </button>
+
           {/* Sync Offset Controls */}
           <div className="flex items-center gap-1 bg-white/10 border border-white/10 rounded-full px-2 py-0.5 text-xs">
             <button
@@ -638,9 +758,21 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
             <span className="text-xs font-medium tracking-wide">Syncing Apple Music lyrics…</span>
           </div>
         ) : !cleanLines.length ? (
-          <div className="flex flex-col items-center justify-center py-32 gap-3 opacity-40 text-center">
-            <Music2 size={36} />
-            <span className="text-sm font-semibold">No lyrics found for this track</span>
+          <div className="flex flex-col items-center justify-center py-28 px-4 gap-4 text-center">
+            <div className="p-4 rounded-2xl bg-white/5 border border-white/10 text-white/40 shadow-inner">
+              <Music2 size={36} />
+            </div>
+            <div className="flex flex-col gap-1 max-w-xs">
+              <span className="text-sm font-bold text-white/80">No Lyrics Found</span>
+              <span className="text-xs text-white/50">You can paste custom LRC/TTML lyrics, upload a file, or provide a link for this song.</span>
+            </div>
+            <button
+              onClick={() => setShowCustomModal(true)}
+              className="mt-2 px-4 py-2 rounded-full bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-fuchsia-500/20 active:scale-95 transition-all flex items-center gap-2"
+            >
+              <Plus size={14} />
+              <span>Add Custom Lyrics / Link</span>
+            </button>
           </div>
         ) : (
           <div className="pt-[28vh] pb-[52vh]">
@@ -769,6 +901,178 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
           <span className={`h-1.5 w-1.5 rounded-full ${isPlaying ? 'bg-fuchsia-400 animate-pulse' : 'opacity-30 bg-current'}`} />
           Apple Music Synced Engine
           <span className={`h-1.5 w-1.5 rounded-full ${isPlaying ? 'bg-fuchsia-400 animate-pulse' : 'opacity-30 bg-current'}`} />
+        </div>
+      )}
+
+      {/* Custom Lyrics Modal / Drawer Dialog */}
+      {showCustomModal && (
+        <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-xl flex items-center justify-center p-4">
+          <div className={`w-full max-w-md rounded-3xl border p-5 shadow-2xl flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-200 ${
+            isLight ? 'bg-white/95 border-black/10 text-black' : 'bg-[#18181b]/95 border-white/15 text-white'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="p-2 rounded-xl bg-fuchsia-500/20 text-fuchsia-400">
+                  <FileText size={18} />
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <h3 className="text-sm font-bold">Custom Lyrics / Link</h3>
+                  <span className="text-[10px] opacity-60 truncate max-w-[220px]">
+                    {currentTrack?.title} • {currentTrack?.artist}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowCustomModal(false);
+                  setCustomError('');
+                  setCustomSuccess('');
+                }}
+                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-xs transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Mode Switcher Tabs */}
+            <div className="flex items-center gap-1 p-1 rounded-xl bg-white/10 border border-white/10 text-xs font-semibold">
+              <button
+                onClick={() => { setCustomMode('url'); setCustomError(''); }}
+                className={`flex-1 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                  customMode === 'url' ? 'bg-fuchsia-600 text-white shadow-sm' : 'opacity-60 hover:opacity-100'
+                }`}
+              >
+                <LinkIcon size={12} />
+                <span>Link URL</span>
+              </button>
+              <button
+                onClick={() => { setCustomMode('paste'); setCustomError(''); }}
+                className={`flex-1 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                  customMode === 'paste' ? 'bg-fuchsia-600 text-white shadow-sm' : 'opacity-60 hover:opacity-100'
+                }`}
+              >
+                <FileText size={12} />
+                <span>Paste Text</span>
+              </button>
+              <button
+                onClick={() => { setCustomMode('upload'); setCustomError(''); }}
+                className={`flex-1 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                  customMode === 'upload' ? 'bg-fuchsia-600 text-white shadow-sm' : 'opacity-60 hover:opacity-100'
+                }`}
+              >
+                <Upload size={12} />
+                <span>Upload File</span>
+              </button>
+            </div>
+
+            {/* Tab 1: URL Input */}
+            {customMode === 'url' && (
+              <div className="flex flex-col gap-2">
+                <label className="text-[11px] font-medium opacity-70">
+                  Paste Direct Link (LRC, TTML, GitHub Raw, Pastebin):
+                </label>
+                <input
+                  type="url"
+                  placeholder="https://example.com/song.lrc or raw paste URL"
+                  value={customUrlInput}
+                  onChange={e => setCustomUrlInput(e.target.value)}
+                  className={`w-full px-3 py-2 rounded-xl text-xs border outline-none focus:ring-2 focus:ring-fuchsia-500 ${
+                    isLight ? 'bg-black/5 border-black/10 text-black' : 'bg-white/5 border-white/10 text-white'
+                  }`}
+                />
+                <span className="text-[10px] opacity-50">
+                  Tip: Supports any public direct link containing timed [mm:ss.xx] lines or TTML XML.
+                </span>
+              </div>
+            )}
+
+            {/* Tab 2: Paste Raw Lyrics */}
+            {customMode === 'paste' && (
+              <div className="flex flex-col gap-2">
+                <label className="text-[11px] font-medium opacity-70">
+                  Paste Synced LRC or Plain Lyrics:
+                </label>
+                <textarea
+                  rows={6}
+                  placeholder={`[00:12.34] First lyric line...\n[00:16.80] Second lyric line (with ad-libs)...\n[00:21.00] Third line...`}
+                  value={customTextInput}
+                  onChange={e => setCustomTextInput(e.target.value)}
+                  className={`w-full p-3 rounded-xl text-xs font-mono border outline-none focus:ring-2 focus:ring-fuchsia-500 resize-none ${
+                    isLight ? 'bg-black/5 border-black/10 text-black' : 'bg-white/5 border-white/10 text-white'
+                  }`}
+                />
+              </div>
+            )}
+
+            {/* Tab 3: Upload File */}
+            {customMode === 'upload' && (
+              <div className="flex flex-col gap-2">
+                <label className="text-[11px] font-medium opacity-70">
+                  Upload .lrc, .ttml, or .txt file from your device:
+                </label>
+                <label className="border-2 border-dashed border-white/20 hover:border-fuchsia-500/50 rounded-2xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors">
+                  <Upload size={24} className="opacity-60 text-fuchsia-400" />
+                  <span className="text-xs font-semibold">Click to browse file</span>
+                  <span className="text-[10px] opacity-50">Supports .lrc, .ttml, .xml, .txt</span>
+                  <input
+                    type="file"
+                    accept=".lrc,.ttml,.xml,.txt"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            )}
+
+            {/* Status Messages */}
+            {customError && (
+              <div className="p-2.5 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+                <AlertCircle size={14} className="shrink-0" />
+                <span>{customError}</span>
+              </div>
+            )}
+            {customSuccess && (
+              <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
+                <Check size={14} className="shrink-0" />
+                <span>{customSuccess}</span>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/10">
+              {hasCustomLyrics ? (
+                <button
+                  onClick={handleResetCustomLyrics}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-1.5"
+                >
+                  <Trash2 size={12} />
+                  <span>Clear Custom</span>
+                </button>
+              ) : (
+                <div />
+              )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowCustomModal(false)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold opacity-70 hover:opacity-100 transition-colors"
+                >
+                  Cancel
+                </button>
+
+                {customMode !== 'upload' && (
+                  <button
+                    disabled={customLoading || (customMode === 'url' ? !customUrlInput.trim() : !customTextInput.trim())}
+                    onClick={customMode === 'url' ? handleLoadCustomUrl : handleLoadCustomText}
+                    className="px-4 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white shadow-lg shadow-fuchsia-500/20 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all flex items-center gap-1.5"
+                  >
+                    {customLoading ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                    <span>Load & Sync</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
