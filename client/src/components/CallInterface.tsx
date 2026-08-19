@@ -1489,23 +1489,44 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             </div>
           )}
 
-          {/* Multi-Platform Player Overlay (YouTube, Spotify, SoundCloud, Monochrome) */}
-          {musicState.currentTrack && (
+          {/* Permanent YouTube Synchronized Player Container (Always Mounted in DOM) */}
+          <div
+            className={`transition-all duration-300 rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-black ${
+              musicState.currentTrack && isYouTubeUrl(musicState.currentTrack.url)
+                ? isPlayerExpanded
+                  ? 'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[90vw] max-w-4xl aspect-video block shadow-[0_0_60px_rgba(0,0,0,0.95)]'
+                  : showYtVideo
+                    ? 'absolute bottom-20 md:bottom-24 right-3 md:right-6 z-30 w-64 sm:w-80 md:w-96 aspect-video block'
+                    : 'absolute -top-[9999px] -left-[9999px] w-1 h-1 opacity-0 pointer-events-none'
+                : 'absolute -top-[9999px] -left-[9999px] w-1 h-1 opacity-0 pointer-events-none'
+            }`}
+          >
+            <div id="youtube-sync-player" className="w-full h-full" />
+            <button
+              onClick={() => setShowYtVideo(!showYtVideo)}
+              className="absolute top-1.5 right-1.5 md:top-2 md:right-2 bg-black/80 hover:bg-black text-white/80 hover:text-white p-1 rounded-full text-xs z-40 backdrop-blur-sm border border-white/10"
+              title={showYtVideo ? "Hide Media Player" : "Show Media Player"}
+            >
+              {showYtVideo ? <EyeOff size={13} /> : <Eye size={13} />}
+            </button>
+            <button
+              onClick={() => setIsPlayerExpanded(!isPlayerExpanded)}
+              className="absolute top-1.5 right-8 md:top-2 md:right-9 bg-black/80 hover:bg-black text-white/80 hover:text-white p-1 rounded-full text-xs z-40 backdrop-blur-sm border border-white/10"
+              title={isPlayerExpanded ? "Minimize View" : "Expand Center Stage"}
+            >
+              {isPlayerExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            </button>
+          </div>
+
+          {/* Multi-Platform Web Widget Overlay (Spotify, Monochrome, SoundCloud) */}
+          {musicState.currentTrack && !isYouTubeUrl(musicState.currentTrack.url) && (
             <div
               className={`absolute bottom-20 md:bottom-24 right-3 md:right-6 z-30 transition-all duration-300 rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-[#121212] ${
-                showYtVideo 
-                  ? extractSpotifyInfo(musicState.currentTrack.url) || isMonochromeUrl(musicState.currentTrack.url)
-                    ? 'w-72 sm:w-88 md:w-96 h-64 sm:h-72 block'
-                    : 'w-64 sm:w-80 md:w-96 aspect-video block'
+                showYtVideo && !isPlayerExpanded
+                  ? 'w-72 sm:w-88 md:w-96 h-64 sm:h-72 block'
                   : 'w-1 h-1 opacity-0 pointer-events-none'
               }`}
             >
-              {/* YouTube Container */}
-              <div
-                id="youtube-sync-player"
-                className={`w-full h-full ${isYouTubeUrl(musicState.currentTrack.url) ? 'block' : 'hidden'}`}
-              />
-
               {/* Spotify Embed Widget */}
               {extractSpotifyInfo(musicState.currentTrack.url) && (
                 <iframe

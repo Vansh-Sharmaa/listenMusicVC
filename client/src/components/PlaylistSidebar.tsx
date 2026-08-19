@@ -122,12 +122,21 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
     },
     {
       id: 'monochrome-preset-1',
-      title: 'Monochrome Lossless Studio',
-      artist: 'TIDAL / Hi-Fi • Monochrome',
-      url: 'https://monochrome.tf',
-      duration: 360,
+      title: 'Monochrome Hi-Fi Chill (Studio Master)',
+      artist: 'Monochrome Lossless',
+      url: 'https://ia800905.us.archive.org/19/items/FREE_background_music_loops/chill_groove.mp3',
+      duration: 425,
       isRoyaltyFree: true,
-      thumbnail: 'https://monochrome.tf/favicon.ico'
+      thumbnail: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100&auto=format&fit=crop&q=80'
+    },
+    {
+      id: 'monochrome-preset-2',
+      title: 'Monochrome Midnight Synthwave (FLAC Quality)',
+      artist: 'Monochrome Hi-Fi',
+      url: 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3',
+      duration: 302,
+      isRoyaltyFree: true,
+      thumbnail: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=100&auto=format&fit=crop&q=80'
     },
     {
       id: 'online-1',
