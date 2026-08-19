@@ -1088,6 +1088,18 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     }
   };
 
+  // Responsive layout detection
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
   const remotePeerList = Array.from(remotePeers.values());
   const totalParticipants = Math.max(remotePeerList.length + 1, participants.length);
 
@@ -1096,11 +1108,11 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   // ─────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-screen bg-[#09090b] overflow-hidden text-white font-sans">
+    <div className="flex flex-col h-[100dvh] bg-[#09090b] overflow-hidden text-white font-sans select-none">
       {/* Top Navigation Bar */}
-      <div className="h-14 bg-black/40 border-b border-white/5 backdrop-blur-md px-6 flex justify-between items-center z-10">
-        <div className="flex items-center gap-3">
-          <span className="font-semibold text-sm tracking-wide bg-gradient-to-r from-emerald-400 to-fuchsia-400 bg-clip-text text-transparent font-mono">
+      <div className="h-12 md:h-14 bg-black/50 border-b border-white/10 backdrop-blur-md px-3 md:px-6 flex justify-between items-center z-20 flex-shrink-0">
+        <div className="flex items-center gap-2 md:gap-3">
+          <span className="font-semibold text-xs md:text-sm tracking-wide bg-gradient-to-r from-emerald-400 to-fuchsia-400 bg-clip-text text-transparent font-mono">
             Room: {roomId}
           </span>
           <button
@@ -1109,42 +1121,40 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
               navigator.clipboard.writeText(url);
               alert(`Room Link Copied!\n\nShare this with your partner:\n${url}`);
             }}
-            className="bg-white/10 hover:bg-white/20 text-white/80 hover:text-white px-2.5 py-1 rounded-lg text-xs flex items-center gap-1.5 border border-white/10 transition-all active:scale-95"
+            className="bg-white/10 hover:bg-white/20 text-white/80 hover:text-white px-2 py-1 rounded-lg text-[10px] md:text-xs flex items-center gap-1 border border-white/10 transition-all active:scale-95"
           >
-            <Copy size={12} />
-            <span>Copy Link</span>
+            <Copy size={11} />
+            <span>Copy</span>
           </button>
           
           {isConnected ? (
-            <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2.5 py-0.5 rounded-full border border-emerald-500/20 font-semibold uppercase flex items-center gap-1.5">
+            <span className="text-[9px] md:text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20 font-semibold uppercase flex items-center gap-1">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Connected
+              Live
             </span>
           ) : (
-            <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2.5 py-0.5 rounded-full border border-amber-500/30 font-semibold flex items-center gap-1.5" title="Connecting to signaling backend server...">
+            <span className="text-[9px] md:text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30 font-semibold flex items-center gap-1">
               <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-ping" />
-              Connecting to Server...
+              Connecting...
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-white/60 bg-white/5 px-3 py-1 rounded-full border border-white/5">
-          <Users size={14} className={totalParticipants > 1 ? "text-emerald-400" : "text-zinc-400"} />
+        <div className="flex items-center gap-1.5 text-[11px] md:text-xs text-white/70 bg-white/5 px-2.5 py-0.5 md:py-1 rounded-full border border-white/10">
+          <Users size={13} className={totalParticipants > 1 ? "text-emerald-400" : "text-zinc-400"} />
           <span className={totalParticipants > 1 ? "text-white font-semibold" : "text-white/60"}>
-            {totalParticipants} Participant{totalParticipants === 1 ? '' : 's'}
+            {totalParticipants}
           </span>
         </div>
       </div>
 
       {!isConnected && (
-        <div className="bg-amber-950/70 border-b border-amber-500/30 text-amber-200 text-xs px-6 py-1.5 flex items-center justify-between">
-          <span>
-            ⏳ Connecting to backend signaling server... If using free-tier Render, it may take ~30s to wake up on first visit.
-          </span>
+        <div className="bg-amber-950/80 border-b border-amber-500/30 text-amber-200 text-[11px] px-4 py-1 flex items-center justify-between">
+          <span>⏳ Connecting to signaling server...</span>
         </div>
       )}
 
-      {/* Main Content */}
+      {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Permanent hidden music audio element */}
         <audio ref={musicAudioRef} playsInline preload="auto" className="hidden" />
@@ -1155,23 +1165,25 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
               if (musicAudioRef.current) {
                 musicAudioRef.current.play().then(() => setAutoplayBlocked(false)).catch(() => {});
               }
+              if (ytPlayerRef.current && ytPlayerReadyRef.current) {
+                try { ytPlayerRef.current.playVideo(); } catch (_) {}
+              }
             }}
-            className="absolute top-2 left-1/2 -translate-x-1/2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs px-4 py-2 rounded-full font-bold shadow-xl z-50 animate-bounce flex items-center gap-2 border border-fuchsia-400"
+            className="absolute top-2 left-1/2 -translate-x-1/2 bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-[11px] md:text-xs px-4 py-2 rounded-full font-bold shadow-xl z-50 animate-bounce flex items-center gap-2 border border-fuchsia-400"
           >
             <Music size={14} />
-            <span>Click here to enable shared music sound 🔊</span>
+            <span>Tap to Enable Shared Sound 🔊</span>
           </button>
         )}
 
-        <div className="flex-1 flex flex-col relative justify-center bg-black/20 p-6 overflow-hidden">
-
+        <div className="flex-1 flex flex-col relative justify-between bg-black/20 p-2 md:p-6 overflow-hidden">
           <ReactionOverlay />
 
-          {/* Video Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full w-full max-w-5xl mx-auto items-center justify-center p-2 overflow-y-auto">
+          {/* Video Grid (Optimized for iPhone / Mobile vertical stack & Desktop horizontal grid) */}
+          <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4 w-full max-w-5xl mx-auto items-center justify-center p-1 md:p-2 overflow-y-auto min-h-0">
 
             {/* Local Video */}
-            <div className="bg-[#18181b] aspect-video rounded-3xl overflow-hidden border border-white/10 relative shadow-2xl flex items-center justify-center">
+            <div className="bg-[#18181b] w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-2xl md:rounded-3xl overflow-hidden border border-white/10 relative shadow-2xl flex items-center justify-center">
               <video
                 ref={localVideoRef}
                 autoPlay
@@ -1181,29 +1193,29 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
               />
               {!camOn && (
                 <div className="text-center space-y-2">
-                  <div className="h-16 w-16 bg-white/5 rounded-full flex items-center justify-center mx-auto border border-white/10 text-white/30">
-                    <VideoOff size={24} />
+                  <div className="h-12 w-12 md:h-16 md:w-16 bg-white/5 rounded-full flex items-center justify-center mx-auto border border-white/10 text-white/30">
+                    <VideoOff size={20} />
                   </div>
-                  <span className="text-xs text-white/40">{username} (Camera Off)</span>
+                  <span className="text-[11px] text-white/40">{username} (Camera Off)</span>
                 </div>
               )}
-              <span className="absolute bottom-4 left-4 text-xs font-semibold bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm flex items-center gap-1.5">
-                <span className={`h-2.5 w-2.5 rounded-full ${micOn ? 'bg-emerald-500' : 'bg-red-500'}`} />
+              <span className="absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold bg-black/60 px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border border-white/10 backdrop-blur-sm flex items-center gap-1.5">
+                <span className={`h-2 w-2 rounded-full ${micOn ? 'bg-emerald-500' : 'bg-red-500'}`} />
                 {username} (You)
               </span>
             </div>
 
-            {/* Screen Share */}
+            {/* Screen Share Tile */}
             {isScreenSharing && (
-              <div className="bg-[#18181b] aspect-video rounded-3xl overflow-hidden border border-emerald-500/30 relative shadow-2xl flex items-center justify-center">
+              <div className="bg-[#18181b] w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-2xl md:rounded-3xl overflow-hidden border border-emerald-500/30 relative shadow-2xl flex items-center justify-center">
                 <video
                   ref={(el) => { if (el && screenStream) el.srcObject = screenStream; }}
                   autoPlay
                   playsInline
                   className="w-full h-full object-contain"
                 />
-                <span className="absolute bottom-4 left-4 text-xs font-semibold bg-emerald-950/80 text-emerald-300 px-3 py-1 rounded-full border border-emerald-500/30 backdrop-blur-sm flex items-center gap-1.5">
-                  <Tv size={14} /> Your Screen Share
+                <span className="absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold bg-emerald-950/80 text-emerald-300 px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border border-emerald-500/30 backdrop-blur-sm flex items-center gap-1.5">
+                  <Tv size={12} /> Your Screen Share
                 </span>
               </div>
             )}
@@ -1213,10 +1225,10 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
               const videoTracks = peer.stream.getVideoTracks();
               if (videoTracks.length <= 1) {
                 return [
-                  <div key={peer.socketId} className="bg-[#18181b] aspect-video rounded-3xl overflow-hidden border border-white/10 relative shadow-2xl flex items-center justify-center">
+                  <div key={peer.socketId} className="bg-[#18181b] w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-2xl md:rounded-3xl overflow-hidden border border-white/10 relative shadow-2xl flex items-center justify-center">
                     <RemoteVideoPlayer stream={peer.stream} username={peer.username} />
-                    <span className="absolute bottom-4 left-4 text-xs font-semibold bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm flex items-center gap-1.5 z-10">
-                      <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold bg-black/60 px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border border-white/10 backdrop-blur-sm flex items-center gap-1.5 z-10">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                       {peer.username}
                     </span>
                   </div>
@@ -1226,11 +1238,11 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                 const singleStream = new MediaStream([track, ...peer.stream.getAudioTracks()]);
                 const isScreen = idx > 0;
                 return (
-                  <div key={`${peer.socketId}_${track.id}`} className={`bg-[#18181b] aspect-video rounded-3xl overflow-hidden ${isScreen ? 'border border-emerald-500/30' : 'border border-white/10'} relative shadow-2xl flex items-center justify-center`}>
+                  <div key={`${peer.socketId}_${track.id}`} className={`bg-[#18181b] w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-2xl md:rounded-3xl overflow-hidden ${isScreen ? 'border border-emerald-500/30' : 'border border-white/10'} relative shadow-2xl flex items-center justify-center`}>
                     <RemoteVideoPlayer stream={singleStream} username={peer.username} />
-                    <span className={`absolute bottom-4 left-4 text-xs font-semibold ${isScreen ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/30' : 'bg-black/60 text-white border-white/10'} px-3 py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 z-10`}>
-                      {isScreen ? <Tv size={14} /> : <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />}
-                      {peer.username} {isScreen ? "'s Screen Share" : ''}
+                    <span className={`absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold ${isScreen ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/30' : 'bg-black/60 text-white border-white/10'} px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 z-10`}>
+                      {isScreen ? <Tv size={12} /> : <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />}
+                      {peer.username} {isScreen ? "'s Screen" : ''}
                     </span>
                   </div>
                 );
@@ -1239,31 +1251,21 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
             {/* Waiting placeholder (only when no remote peers) */}
             {remotePeerList.length === 0 && (
-              <div className="bg-[#18181b] aspect-video rounded-3xl overflow-hidden border border-white/10 relative shadow-2xl flex items-center justify-center">
-                <div className="text-center space-y-3">
-                  <div className={`h-16 w-16 rounded-full flex items-center justify-center mx-auto border transition-all duration-300 ${
+              <div className="bg-[#18181b] w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-2xl md:rounded-3xl overflow-hidden border border-white/10 relative shadow-2xl flex items-center justify-center">
+                <div className="text-center space-y-2 md:space-y-3">
+                  <div className={`h-12 w-12 md:h-16 md:w-16 rounded-full flex items-center justify-center mx-auto border transition-all duration-300 ${
                     mockSpeakingUser === 'Partner'
                       ? 'bg-emerald-600/30 border-emerald-400 shadow-[0_0_12px_#10b981]'
                       : 'bg-white/5 border-white/10'
                   }`}>
-                    <span className="text-lg font-bold text-white/70">P</span>
+                    <span className="text-base md:text-lg font-bold text-white/70">P</span>
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-xs text-white/60">Partner (Waiting to join...)</span>
-                    <button
-                      onClick={() => toggleMockSpeech('Partner')}
-                      className={`text-[10px] mt-2 px-2.5 py-1 rounded-full font-semibold transition-all ${
-                        mockSpeakingUser === 'Partner'
-                          ? 'bg-emerald-600 text-white shadow-lg'
-                          : 'bg-white/10 hover:bg-white/15 text-white/60 hover:text-white'
-                      }`}
-                    >
-                      {mockSpeakingUser === 'Partner' ? 'Stop Speaking' : 'Test Speech Ducking'}
-                    </button>
+                    <span className="text-[11px] md:text-xs text-white/60">Partner (Waiting to join...)</span>
                   </div>
                 </div>
-                <span className="absolute bottom-4 left-4 text-xs font-semibold bg-black/60 px-3 py-1 rounded-full border border-white/10 backdrop-blur-sm">
-                  Waiting for 2nd Tab / Partner...
+                <span className="absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold bg-black/60 px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border border-white/10 backdrop-blur-sm">
+                  Waiting for Partner...
                 </span>
               </div>
             )}
@@ -1271,12 +1273,12 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
           {/* Emoji Reaction Menu */}
           {showReactionMenu && (
-            <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-[#18181b]/95 border border-white/10 backdrop-blur-md py-2.5 px-4 rounded-2xl flex gap-3 shadow-2xl z-50">
+            <div className="absolute bottom-20 md:bottom-24 left-1/2 -translate-x-1/2 bg-[#18181b]/95 border border-white/10 backdrop-blur-md py-2 px-3 md:py-2.5 md:px-4 rounded-2xl flex gap-2 md:gap-3 shadow-2xl z-50">
               {['❤️', '😂', '👍', '😮', '👏', '🔥'].map((emoji) => (
                 <button
                   key={emoji}
                   onClick={() => handleTriggerReaction(emoji)}
-                  className="text-2xl hover:scale-125 transition-transform active:scale-95 duration-200"
+                  className="text-xl md:text-2xl hover:scale-125 transition-transform active:scale-95 duration-200"
                 >
                   {emoji}
                 </button>
@@ -1284,105 +1286,119 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             </div>
           )}
 
-          {/* Bottom Toolbar */}
-          <div className="h-20 flex justify-center items-center gap-3 md:gap-4 z-10 select-none">
-            <button onClick={toggleMic} className={`p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${micOn ? 'bg-white/10 hover:bg-white/15 border-white/10 text-white' : 'bg-red-500/20 hover:bg-red-500/30 border-red-500/30 text-red-400'}`}>
-              {micOn ? <Mic size={20} /> : <MicOff size={20} />}
+          {/* YouTube Video Player Overlay / Background Audio Element */}
+          <div
+            className={`absolute bottom-20 md:bottom-24 right-3 md:right-6 z-30 transition-all duration-300 rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-black ${
+              isYouTubeUrl(musicState.currentTrack?.url || '')
+                ? showYtVideo
+                  ? 'w-48 sm:w-72 md:w-80 aspect-video block'
+                  : 'w-1 h-1 opacity-0 pointer-events-none'
+                : 'hidden'
+            }`}
+          >
+            <div id="youtube-sync-player" className="w-full h-full" />
+            <button
+              onClick={() => setShowYtVideo(!showYtVideo)}
+              className="absolute top-1.5 right-1.5 md:top-2 md:right-2 bg-black/70 hover:bg-black/90 text-white/80 hover:text-white p-1 rounded-full text-xs z-40 backdrop-blur-sm border border-white/10"
+              title={showYtVideo ? "Hide Music Video" : "Show Music Video"}
+            >
+              {showYtVideo ? <EyeOff size={13} /> : <Eye size={13} />}
             </button>
-            <button onClick={toggleCam} className={`p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${camOn ? 'bg-white/10 hover:bg-white/15 border-white/10 text-white' : 'bg-red-500/20 hover:bg-red-500/30 border-red-500/30 text-red-400'}`}>
-              {camOn ? <Video size={20} /> : <VideoOff size={20} />}
+          </div>
+
+          {/* Global Synchronized Music Pill (when song is selected) */}
+          {musicState.currentTrack && (
+            <div className="absolute top-2 right-2 md:top-4 md:right-6 z-30 bg-[#18181b]/95 border border-fuchsia-500/30 backdrop-blur-md px-2.5 py-1.5 md:px-3.5 md:py-2 rounded-2xl shadow-xl flex items-center gap-2 md:gap-3 animate-fade-in max-w-[200px] sm:max-w-xs md:max-w-sm">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <span className="h-2 w-2 rounded-full bg-fuchsia-400 animate-pulse flex-shrink-0" />
+                <div className="flex flex-col min-w-0">
+                  <span className="text-[11px] md:text-xs font-bold text-white truncate">
+                    {musicState.currentTrack.title}
+                  </span>
+                  <span className="text-[9px] md:text-[10px] text-fuchsia-300/70 truncate">
+                    {musicState.currentTrack.artist}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                {isYouTubeUrl(musicState.currentTrack.url) && (
+                  <button
+                    onClick={() => setShowYtVideo(!showYtVideo)}
+                    className={`p-1 md:p-1.5 rounded-lg text-xs transition-all border ${
+                      showYtVideo 
+                        ? 'bg-fuchsia-600/30 border-fuchsia-500/40 text-fuchsia-200' 
+                        : 'bg-white/5 border-white/10 text-white/60 hover:text-white'
+                    }`}
+                    title={showYtVideo ? "Hide YouTube Video" : "Show YouTube Video"}
+                  >
+                    {showYtVideo ? <Eye size={12} /> : <EyeOff size={12} />}
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    if (musicState.isPlaying) {
+                      sendMusicAction('pause', musicState.currentTrackId, musicState.lastPosition, musicState.currentTrack);
+                    } else {
+                      sendMusicAction('play', musicState.currentTrackId, musicState.lastPosition, musicState.currentTrack);
+                    }
+                  }}
+                  className="bg-fuchsia-600 hover:bg-fuchsia-500 p-1.5 rounded-xl text-white transition-all active:scale-95 shadow-md shadow-fuchsia-950/40"
+                >
+                  {musicState.isPlaying ? <Pause size={13} fill="white" /> : <Play size={13} fill="white" />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Bottom Toolbar (iPhone & Mobile optimized with safe areas) */}
+          <div className="h-16 md:h-20 flex justify-center items-center gap-1.5 md:gap-3.5 z-20 flex-shrink-0 select-none pb-2 md:pb-0">
+            <button onClick={toggleMic} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${micOn ? 'bg-white/10 hover:bg-white/15 border-white/10 text-white' : 'bg-red-500/20 hover:bg-red-500/30 border-red-500/30 text-red-400'}`}>
+              {micOn ? <Mic size={18} /> : <MicOff size={18} />}
             </button>
-            <button onClick={toggleScreenShare} className={`p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${isScreenSharing ? 'bg-emerald-600/20 border-emerald-500/30 text-emerald-400' : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'}`}>
-              <Monitor size={20} />
+            <button onClick={toggleCam} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${camOn ? 'bg-white/10 hover:bg-white/15 border-white/10 text-white' : 'bg-red-500/20 hover:bg-red-500/30 border-red-500/30 text-red-400'}`}>
+              {camOn ? <Video size={18} /> : <VideoOff size={18} />}
             </button>
-            <button onClick={() => setShowReactionMenu(!showReactionMenu)} className={`p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${showReactionMenu ? 'bg-fuchsia-600/20 border-fuchsia-500/30 text-fuchsia-400' : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'}`}>
-              <Smile size={20} />
+            <button onClick={toggleScreenShare} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${isScreenSharing ? 'bg-emerald-600/20 border-emerald-500/30 text-emerald-400' : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'}`}>
+              <Monitor size={18} />
             </button>
-            <span className="w-[1px] h-6 bg-white/10 mx-2" />
-            <button onClick={() => setActiveSidebar(activeSidebar === 'mixer' ? null : 'mixer')} className={`p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${activeSidebar === 'mixer' ? 'bg-blue-600/20 border-blue-500/30 text-blue-400' : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'}`}>
-              <Sliders size={20} />
+            <button onClick={() => setShowReactionMenu(!showReactionMenu)} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${showReactionMenu ? 'bg-fuchsia-600/20 border-fuchsia-500/30 text-fuchsia-400' : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'}`}>
+              <Smile size={18} />
             </button>
-            <button onClick={() => setActiveSidebar(activeSidebar === 'music' ? null : 'music')} className={`p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${activeSidebar === 'music' ? 'bg-fuchsia-600/20 border-fuchsia-500/30 text-fuchsia-400' : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'}`}>
-              <Music size={20} />
+            <span className="w-[1px] h-5 bg-white/10 mx-0.5 md:mx-1" />
+            <button onClick={() => setActiveSidebar(activeSidebar === 'mixer' ? null : 'mixer')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${activeSidebar === 'mixer' ? 'bg-blue-600/20 border-blue-500/30 text-blue-400' : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'}`}>
+              <Sliders size={18} />
             </button>
-            <button onClick={() => setActiveSidebar(activeSidebar === 'chat' ? null : 'chat')} className={`p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${activeSidebar === 'chat' ? 'bg-emerald-600/20 border-emerald-500/30 text-emerald-400' : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'}`}>
-              <MessageSquare size={20} />
+            <button onClick={() => setActiveSidebar(activeSidebar === 'music' ? null : 'music')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${activeSidebar === 'music' ? 'bg-fuchsia-600/20 border-fuchsia-500/30 text-fuchsia-400' : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'}`}>
+              <Music size={18} />
             </button>
-            <button onClick={handleLeaveCall} className="p-3.5 rounded-2xl bg-red-600 hover:bg-red-500 text-white transition-all active:scale-90 duration-300 shadow-lg shadow-red-950/40">
-              <PhoneOff size={20} />
+            <button onClick={() => setActiveSidebar(activeSidebar === 'chat' ? null : 'chat')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${activeSidebar === 'chat' ? 'bg-emerald-600/20 border-emerald-500/30 text-emerald-400' : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'}`}>
+              <MessageSquare size={18} />
+            </button>
+            <button onClick={handleLeaveCall} className="p-2.5 md:p-3.5 rounded-2xl bg-red-600 hover:bg-red-500 text-white transition-all active:scale-90 duration-300 shadow-lg shadow-red-950/40">
+              <PhoneOff size={18} />
             </button>
           </div>
         </div>
 
-        {/* YouTube Video Player Overlay / Background Audio Element */}
-        <div
-          className={`absolute bottom-24 right-6 z-30 transition-all duration-300 rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-black ${
-            isYouTubeUrl(musicState.currentTrack?.url || '')
-              ? showYtVideo
-                ? 'w-72 sm:w-80 aspect-video block'
-                : 'w-1 h-1 opacity-0 pointer-events-none'
-              : 'hidden'
-          }`}
-        >
-          <div id="youtube-sync-player" className="w-full h-full" />
-          <button
-            onClick={() => setShowYtVideo(!showYtVideo)}
-            className="absolute top-2 right-2 bg-black/70 hover:bg-black/90 text-white/80 hover:text-white p-1 rounded-full text-xs z-40 backdrop-blur-sm border border-white/10"
-            title={showYtVideo ? "Hide Music Video" : "Show Music Video"}
-          >
-            {showYtVideo ? <EyeOff size={14} /> : <Eye size={14} />}
-          </button>
-        </div>
-
-        {/* Global Synchronized Music Pill (when song is playing) */}
-        {musicState.currentTrack && (
-          <div className="absolute top-4 right-6 z-30 bg-[#18181b]/90 border border-fuchsia-500/30 backdrop-blur-md px-3.5 py-2 rounded-2xl shadow-xl flex items-center gap-3 animate-fade-in max-w-xs sm:max-w-sm">
-            <div className="flex items-center gap-2.5 min-w-0 flex-1">
-              <span className="h-2 w-2 rounded-full bg-fuchsia-400 animate-pulse flex-shrink-0" />
-              <div className="flex flex-col min-w-0">
-                <span className="text-xs font-bold text-white truncate">
-                  {musicState.currentTrack.title}
-                </span>
-                <span className="text-[10px] text-fuchsia-300/70 truncate">
-                  {musicState.currentTrack.artist}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 flex-shrink-0">
-              {isYouTubeUrl(musicState.currentTrack.url) && (
+        {/* Sidebars (Mobile modal bottom-sheet / overlay on iPhone, side-docked on desktop) */}
+        {activeSidebar && (
+          <div className={`${isMobile ? 'fixed inset-x-0 bottom-0 top-12 z-50 bg-[#09090b]/98' : 'relative h-full flex-shrink-0'}`}>
+            <div className="relative h-full w-full">
+              {isMobile && (
                 <button
-                  onClick={() => setShowYtVideo(!showYtVideo)}
-                  className={`p-1.5 rounded-lg text-xs transition-all border ${
-                    showYtVideo 
-                      ? 'bg-fuchsia-600/30 border-fuchsia-500/40 text-fuchsia-200' 
-                      : 'bg-white/5 border-white/10 text-white/60 hover:text-white'
-                  }`}
-                  title={showYtVideo ? "Hide YouTube Video" : "Show YouTube Video"}
+                  onClick={() => setActiveSidebar(null)}
+                  className="absolute top-3 right-3 z-50 bg-white/10 hover:bg-white/20 text-white text-xs px-2.5 py-1 rounded-full border border-white/20"
                 >
-                  {showYtVideo ? <Eye size={13} /> : <EyeOff size={13} />}
+                  ✕ Close
                 </button>
               )}
-              <button
-                onClick={() => {
-                  if (musicState.isPlaying) {
-                    sendMusicAction('pause', musicState.currentTrackId, musicState.lastPosition, musicState.currentTrack);
-                  } else {
-                    sendMusicAction('play', musicState.currentTrackId, musicState.lastPosition, musicState.currentTrack);
-                  }
-                }}
-                className="bg-fuchsia-600 hover:bg-fuchsia-500 p-1.5 rounded-xl text-white transition-all active:scale-95 shadow-md shadow-fuchsia-950/40"
-              >
-                {musicState.isPlaying ? <Pause size={14} fill="white" /> : <Play size={14} fill="white" />}
-              </button>
+              {activeSidebar === 'chat' && <ChatSidebar />}
+              {activeSidebar === 'music' && <PlaylistSidebar onStartScreenShare={toggleScreenShare} />}
+              {activeSidebar === 'mixer' && <AudioMixerPanel />}
             </div>
           </div>
         )}
-
-        {/* Sidebars */}
-        {activeSidebar === 'chat' && <ChatSidebar />}
-        {activeSidebar === 'music' && <PlaylistSidebar onStartScreenShare={toggleScreenShare} />}
-        {activeSidebar === 'mixer' && <AudioMixerPanel />}
       </div>
     </div>
   );
