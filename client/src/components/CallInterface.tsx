@@ -40,59 +40,68 @@ interface PeerStream {
   stream: MediaStream;
 }
 
-// Safe remote video player with guaranteed autoplay and avatar fallback
+// Safe remote video player with guaranteed autoplay
 const RemoteVideoPlayer: React.FC<{ stream: MediaStream; username?: string }> = ({ stream, username = 'Partner' }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [hasVideoTrack, setHasVideoTrack] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !stream) return;
 
-    const vTracks = stream.getVideoTracks();
-    setHasVideoTrack(vTracks.length > 0);
-
     video.srcObject = stream;
 
-    const playVideo = () => {
-      video.play().catch(err => {
-        console.warn('[WebRTC] Remote video play retry:', err.message);
-      });
+    const playVideo = async () => {
+      try {
+        await video.play();
+        if (video.videoWidth > 0) {
+          setIsPlaying(true);
+        }
+      } catch (err: any) {
+        console.warn('[WebRTC] Remote video play retry:', err?.message);
+      }
     };
 
     playVideo();
     video.onloadedmetadata = () => {
-      setHasVideoTrack(stream.getVideoTracks().length > 0);
       playVideo();
     };
-    video.oncanplay = playVideo;
+    video.oncanplay = () => {
+      playVideo();
+    };
+    video.onplaying = () => {
+      setIsPlaying(true);
+    };
 
-    stream.onaddtrack = () => {
-      setHasVideoTrack(stream.getVideoTracks().length > 0);
+    const handleTrack = () => {
       if (videoRef.current) {
-        videoRef.current.srcObject = new MediaStream(stream.getTracks());
+        videoRef.current.srcObject = stream;
         playVideo();
       }
     };
+
+    stream.onaddtrack = handleTrack;
+    stream.onremovetrack = handleTrack;
   }, [stream]);
 
   return (
-    <div className="relative w-full h-full flex items-center justify-center bg-[#18181b]">
+    <div className="relative w-full h-full flex items-center justify-center bg-[#18181b] overflow-hidden">
+      {/* Background Avatar placeholder when video frames are loading */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 select-none z-0">
+        <div className="h-20 w-20 rounded-full bg-gradient-to-br from-fuchsia-600 to-indigo-600 flex items-center justify-center text-2xl font-bold text-white shadow-xl border border-white/20 animate-pulse">
+          {username.charAt(0).toUpperCase()}
+        </div>
+        <span className="text-xs text-white/50">{username} (Connecting Video...)</span>
+      </div>
+
+      {/* Video Element - ALWAYS active in DOM so browser decodes and displays frames */}
       <video
         ref={videoRef}
         autoPlay
         muted
         playsInline
-        className={`w-full h-full object-cover ${!hasVideoTrack ? 'hidden' : ''}`}
+        className={`absolute inset-0 w-full h-full object-cover z-10 transition-opacity duration-300 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}
       />
-      {!hasVideoTrack && (
-        <div className="flex flex-col items-center justify-center gap-3 select-none">
-          <div className="h-20 w-20 rounded-full bg-gradient-to-br from-fuchsia-600 to-indigo-600 flex items-center justify-center text-2xl font-bold text-white shadow-xl border border-white/20 animate-pulse">
-            {username.charAt(0).toUpperCase()}
-          </div>
-          <span className="text-xs text-white/50">{username} (Camera Connecting...)</span>
-        </div>
-      )}
     </div>
   );
 };
