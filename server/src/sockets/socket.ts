@@ -157,48 +157,79 @@ export function setupSockets(io: Server) {
       action: 'play' | 'pause' | 'seek' | 'change';
       trackId?: string | null;
       position?: number;
-      timestamp: number;
+      timestamp?: number;
       trackData?: any;
     }) => {
-      const { roomId, action, trackId, position, timestamp, trackData } = payload;
-      console.log(`Music action in room ${roomId}: ${action} (trackId: ${trackId}, position: ${position})`);
+      const { roomId, action, trackId, position, trackData } = payload;
+      if (!roomId) return;
 
       try {
-        let updatedState = null;
+        const currentServerState = await db.getRoomMusicState(roomId);
+        const serverNow = Date.now();
+
+        // Calculate authoritative current playback position based on server clock
+        let calculatedPosition = position;
+        if (calculatedPosition === undefined) {
+          if (currentServerState) {
+            const elapsed = currentServerState.isPlaying
+              ? (serverNow - Number(currentServerState.lastPositionUpdatedAt || serverNow)) / 1000
+              : 0;
+            calculatedPosition = Math.max(0, (currentServerState.lastPosition || 0) + elapsed);
+          } else {
+            calculatedPosition = 0;
+          }
+        }
+
+        let updatedState: any = null;
         if (action === 'change') {
           updatedState = await db.updateRoomMusicState(roomId, {
             currentTrackId: trackId,
             isPlaying: false,
-            lastPosition: 0.0
+            lastPosition: 0.0,
+            trackData,
+            updatedBy: currentUserId || socket.id
           });
         } else if (action === 'play') {
           updatedState = await db.updateRoomMusicState(roomId, {
+            currentTrackId: trackId || currentServerState?.currentTrackId,
             isPlaying: true,
-            lastPosition: position !== undefined ? position : 0.0
+            lastPosition: calculatedPosition,
+            trackData: trackData || currentServerState?.currentTrack,
+            updatedBy: currentUserId || socket.id
           });
         } else if (action === 'pause') {
           updatedState = await db.updateRoomMusicState(roomId, {
+            currentTrackId: trackId || currentServerState?.currentTrackId,
             isPlaying: false,
-            lastPosition: position !== undefined ? position : 0.0
+            lastPosition: calculatedPosition,
+            trackData: trackData || currentServerState?.currentTrack,
+            updatedBy: currentUserId || socket.id
           });
         } else if (action === 'seek') {
           updatedState = await db.updateRoomMusicState(roomId, {
-            lastPosition: position !== undefined ? position : 0.0
+            currentTrackId: trackId || currentServerState?.currentTrackId,
+            lastPosition: calculatedPosition,
+            trackData: trackData || currentServerState?.currentTrack,
+            updatedBy: currentUserId || socket.id
           });
         }
 
-        // Broadcast music state change to all clients in the room
+        const finalState = updatedState || currentServerState;
+
+        // Broadcast authoritative music state change with monotonic stateVersion & server timestamp
         io.to(roomId).emit('music:state-change', {
           action,
-          trackId: updatedState?.currentTrackId || trackId,
-          position: updatedState?.lastPosition !== undefined ? updatedState.lastPosition : position,
-          isPlaying: updatedState?.isPlaying,
-          trackData: trackData || updatedState?.currentTrack,
-          timestamp: Date.now() // server's reference time for synchronization
+          trackId: finalState?.currentTrackId || trackId,
+          position: finalState?.lastPosition !== undefined ? finalState.lastPosition : calculatedPosition,
+          isPlaying: finalState?.isPlaying,
+          trackData: finalState?.currentTrack || trackData,
+          timestamp: serverNow,
+          stateVersion: finalState?.stateVersion || Date.now(),
+          updatedBy: currentUserId || socket.id
         });
 
       } catch (error) {
-        console.error('Error handling music action:', error);
+        console.error('Error handling server authoritative music action:', error);
       }
     });
 

@@ -201,27 +201,61 @@ class MockDatabase {
     };
   }
 
-  async updateRoomMusicState(roomId: string, data: { currentTrackId?: string | null; isPlaying?: boolean; lastPosition?: number }) {
+  async updateRoomMusicState(roomId: string, data: {
+    currentTrackId?: string | null;
+    isPlaying?: boolean;
+    lastPosition?: number;
+    trackData?: any;
+    updatedBy?: string;
+  }) {
     const state = this.roomMusicStates.get(roomId) || {
       id: randomUUID(),
       roomId,
       currentTrackId: null,
       isPlaying: false,
       lastPosition: 0.0,
-      lastPositionUpdatedAt: new Date(),
-      updatedAt: new Date(),
+      lastPositionUpdatedAt: Date.now(),
+      updatedAt: Date.now(),
+      stateVersion: 0,
+      currentTrack: null,
+      updatedBy: null
     };
 
-    if (data.currentTrackId !== undefined) state.currentTrackId = data.currentTrackId;
-    if (data.isPlaying !== undefined) state.isPlaying = data.isPlaying;
+    if (data.trackData !== undefined) {
+      state.currentTrack = data.trackData;
+      if (data.trackData?.id) {
+        this.tracks.set(data.trackData.id, data.trackData);
+      }
+    }
+
+    if (data.currentTrackId !== undefined) {
+      state.currentTrackId = data.currentTrackId;
+      if (!data.trackData && data.currentTrackId && this.tracks.has(data.currentTrackId)) {
+        state.currentTrack = this.tracks.get(data.currentTrackId);
+      }
+    }
+
+    if (data.isPlaying !== undefined) {
+      state.isPlaying = data.isPlaying;
+    }
+
     if (data.lastPosition !== undefined) {
       state.lastPosition = data.lastPosition;
-      state.lastPositionUpdatedAt = new Date();
+      state.lastPositionUpdatedAt = Date.now();
     }
-    state.updatedAt = new Date();
+
+    if (data.updatedBy !== undefined) {
+      state.updatedBy = data.updatedBy;
+    }
+
+    state.stateVersion = (state.stateVersion || 0) + 1;
+    state.updatedAt = Date.now();
 
     this.roomMusicStates.set(roomId, state);
-    return this.getRoomMusicState(roomId);
+    return {
+      ...state,
+      currentTrack: state.currentTrack || (state.currentTrackId ? this.tracks.get(state.currentTrackId) : null)
+    };
   }
 }
 
@@ -370,7 +404,13 @@ export const db = {
     });
   },
 
-  updateRoomMusicState: async (roomId: string, data: { currentTrackId?: string | null; isPlaying?: boolean; lastPosition?: number }) => {
+  updateRoomMusicState: async (roomId: string, data: {
+    currentTrackId?: string | null;
+    isPlaying?: boolean;
+    lastPosition?: number;
+    trackData?: any;
+    updatedBy?: string;
+  }) => {
     if (useMock || !prisma) return mockDb.updateRoomMusicState(roomId, data);
     
     const updateData: any = {};
@@ -381,10 +421,14 @@ export const db = {
       updateData.lastPositionUpdatedAt = new Date();
     }
 
-    return prisma.roomMusicState.update({
-      where: { roomId },
-      data: updateData,
-      include: { currentTrack: true }
-    });
+    try {
+      return await prisma.roomMusicState.update({
+        where: { roomId },
+        data: updateData,
+        include: { currentTrack: true }
+      });
+    } catch (_) {
+      return mockDb.updateRoomMusicState(roomId, data);
+    }
   }
 };

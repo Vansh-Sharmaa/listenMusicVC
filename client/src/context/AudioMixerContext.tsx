@@ -126,14 +126,9 @@ export const AudioMixerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     voiceAnalyser.connect(voiceGain);
     voiceGain.connect(ctx.destination);
 
-    // Create a MediaStreamDestinationNode to capture music as a WebRTC-sendable track
-    const musicDest = ctx.createMediaStreamDestination();
-    musicDestinationRef.current = musicDest;
-
-    // Connect music path: source -> musicGain -> duckingGain -> destination AND musicDest (for WebRTC)
+    // Connect music path: source -> musicGain -> duckingGain -> local destination
     musicGain.connect(duckingGain);
     duckingGain.connect(ctx.destination);
-    duckingGain.connect(musicDest); // also pipe to the WebRTC capture destination
 
     // Connect screen share path: sources -> screenShareGain -> destination
     screenShareGain.connect(ctx.destination);

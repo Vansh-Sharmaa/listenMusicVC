@@ -22,6 +22,8 @@ interface MusicState {
   isPlaying: boolean;
   lastPosition: number;
   lastPositionUpdatedAt: string | number;
+  stateVersion?: number;
+  updatedBy?: string;
   currentTrack?: {
     id: string;
     title: string;
@@ -204,7 +206,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setActiveReaction({ ...payload, id: Date.now() });
     });
 
-    // Music state changes
+    // Music state changes (Authoritative Server Events)
     sock.on('music:state-change', (payload: {
       action: 'play' | 'pause' | 'seek' | 'change';
       trackId: string | null;
@@ -212,14 +214,25 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       isPlaying?: boolean;
       trackData?: any;
       timestamp: number;
+      stateVersion?: number;
+      updatedBy?: string;
     }) => {
       setMusicState(prev => {
+        // Discard stale out-of-order state events
+        if (payload.stateVersion && prev.stateVersion && payload.stateVersion < prev.stateVersion) {
+          console.warn(`[Sync] Discarding stale music event (received v${payload.stateVersion} < current v${prev.stateVersion})`);
+          return prev;
+        }
+
         const next = { ...prev };
         if (payload.trackId !== undefined) next.currentTrackId = payload.trackId;
         if (payload.isPlaying !== undefined) next.isPlaying = payload.isPlaying;
         if (payload.position !== undefined) next.lastPosition = payload.position;
         if (payload.trackData !== undefined) next.currentTrack = payload.trackData;
         next.lastPositionUpdatedAt = payload.timestamp;
+        next.stateVersion = payload.stateVersion || Date.now();
+        next.updatedBy = payload.updatedBy;
+
         if (payload.action === 'change') {
           next.isPlaying = false;
           next.lastPosition = 0.0;

@@ -615,15 +615,30 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
           if (musicState.isPlaying) {
             ytPlayerRef.current.playVideo();
-            // Smooth drift correction only if out of sync by > 3.0 seconds
             const currentPos = ytPlayerRef.current.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : 0;
-            if (Math.abs(currentPos - targetPos) > 3.0) {
+            const drift = targetPos - currentPos;
+
+            // 3-Tier Drift Management Policy
+            if (Math.abs(drift) > 1.2) {
+              // Tier 3: Major drift (> 1.2s) -> Hard seek
               ytPlayerRef.current.seekTo(targetPos, true);
+              if (ytPlayerRef.current.setPlaybackRate) ytPlayerRef.current.setPlaybackRate(1.0);
+            } else if (Math.abs(drift) > 0.25) {
+              // Tier 2: Medium drift (250ms - 1.2s) -> Smooth rate nudge without stuttering
+              if (ytPlayerRef.current.setPlaybackRate) {
+                ytPlayerRef.current.setPlaybackRate(drift > 0 ? 1.04 : 0.96);
+              }
+            } else {
+              // Tier 1: Perfect sync zone (< 250ms) -> Normal rate
+              if (ytPlayerRef.current.setPlaybackRate) {
+                ytPlayerRef.current.setPlaybackRate(1.0);
+              }
             }
           } else {
             ytPlayerRef.current.pauseVideo();
+            if (ytPlayerRef.current.setPlaybackRate) ytPlayerRef.current.setPlaybackRate(1.0);
             const currentPos = ytPlayerRef.current.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : 0;
-            if (musicState.lastPosition !== undefined && Math.abs(currentPos - musicState.lastPosition) > 1.5) {
+            if (musicState.lastPosition !== undefined && Math.abs(currentPos - musicState.lastPosition) > 1.0) {
               ytPlayerRef.current.seekTo(musicState.lastPosition, true);
             }
           }
