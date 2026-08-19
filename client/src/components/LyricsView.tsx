@@ -176,9 +176,6 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
           </div>
         ) : (
           <>
-            {/* Top spacing */}
-            <div className="h-8" />
-
             {lyrics.lines.map((line: LyricLine, index: number) => {
               const isActive = index === activeLineIndex;
               const isPast = index < activeLineIndex;
@@ -188,39 +185,27 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
                   key={`${line.time}-${index}`}
                   ref={(el) => { lineRefs.current[index] = el; }}
                   onClick={() => onSeek(line.time)}
-                  className={`w-full text-left transition-all duration-700 ease-[cubic-bezier(0.25,1,0.5,1)] group flex flex-col py-2 rounded-2xl px-3 focus:outline-none ${
+                  className={`w-full text-left transition-all duration-500 ease-out group relative py-2 rounded-2xl px-2 focus:outline-none select-none ${
                     isActive
-                      ? 'scale-[1.05] translate-x-1 opacity-100 z-10'
+                      ? 'scale-[1.04] translate-x-1.5 opacity-100 z-10'
                       : isPast
                       ? 'opacity-35 hover:opacity-85 hover:blur-0'
                       : 'opacity-25 hover:opacity-80 hover:blur-0'
                   }`}
                   style={{
-                    filter: isActive ? 'blur(0px)' : 'blur(1.2px)'
+                    filter: isActive ? 'blur(0px)' : 'blur(0.8px)'
                   }}
                 >
                   <span
-                    className={`text-xl md:text-3xl leading-relaxed tracking-tight transition-all duration-500 font-extrabold ${
+                    className={`text-xl md:text-3xl leading-relaxed tracking-tight font-black transition-all duration-300 block ${
                       isActive
                         ? isLight
-                          ? 'drop-shadow-md'
-                          : 'drop-shadow-[0_0_35px_rgba(255,255,255,0.9)]'
+                          ? 'text-black drop-shadow-md'
+                          : 'text-white drop-shadow-[0_0_35px_rgba(255,255,255,0.95)]'
                         : isLight
-                        ? 'text-black'
-                        : 'text-white'
+                        ? 'text-black/40 group-hover:text-black/80'
+                        : 'text-white/40 group-hover:text-white/80'
                     }`}
-                    style={
-                      isActive
-                        ? {
-                            background: isLight
-                              ? `linear-gradient(90deg, #000000 0%, #000000 ${activeLineProgress}%, rgba(0,0,0,0.3) ${activeLineProgress + 25}%)`
-                              : `linear-gradient(90deg, #ffffff 0%, #ffffff ${activeLineProgress}%, rgba(255,255,255,0.3) ${activeLineProgress + 25}%)`,
-                            WebkitBackgroundClip: 'text',
-                            WebkitTextFillColor: 'transparent',
-                            display: 'inline-block'
-                          }
-                        : undefined
-                    }
                   >
                     {line.text}
                   </span>
