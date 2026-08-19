@@ -1005,19 +1005,54 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   // ─────────────────────────────────────────────────────────────
 
   const toggleMic = () => {
-    const track = localStreamRef.current?.getAudioTracks()[0];
-    if (track) {
-      track.enabled = !micOn;
-      setMicOn(!micOn);
+    const newMicState = !micOn;
+    setMicOn(newMicState);
+
+    // 1. Mute/unmute all local audio tracks
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = newMicState;
+      });
     }
+
+    // 2. Mute/unmute all active WebRTC audio senders across all peer connections
+    peerConnectionsRef.current.forEach((pc) => {
+      pc.getSenders().forEach((sender) => {
+        if (sender.track && sender.track.kind === 'audio') {
+          // Do not mute screenshare senders if screen sharing is active
+          const isScreenSender = Array.from(screenShareSendersRef.current.values()).some(list => list.includes(sender));
+          if (!isScreenSender) {
+            sender.track.enabled = newMicState;
+          }
+        }
+      });
+    });
+
+    console.log(`[Media] Microphone toggled: ${newMicState ? 'UNMUTED 🎙️' : 'MUTED 🔇'}`);
   };
 
   const toggleCam = () => {
-    const track = localStreamRef.current?.getVideoTracks()[0];
-    if (track) {
-      track.enabled = !camOn;
-      setCamOn(!camOn);
+    const newCamState = !camOn;
+    setCamOn(newCamState);
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getVideoTracks().forEach(track => {
+        track.enabled = newCamState;
+      });
     }
+
+    peerConnectionsRef.current.forEach((pc) => {
+      pc.getSenders().forEach((sender) => {
+        if (sender.track && sender.track.kind === 'video') {
+          const isScreenSender = Array.from(screenShareSendersRef.current.values()).some(list => list.includes(sender));
+          if (!isScreenSender) {
+            sender.track.enabled = newCamState;
+          }
+        }
+      });
+    });
+
+    console.log(`[Media] Camera toggled: ${newCamState ? 'ON 📷' : 'OFF 🚫'}`);
   };
 
   const toggleScreenShare = async () => {
