@@ -179,36 +179,72 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
             {lyrics.lines.map((line: LyricLine, index: number) => {
               const isActive = index === activeLineIndex;
               const isPast = index < activeLineIndex;
+              const words = line.text.split(/(\s+)/); // preserve spaces
+
+              // For active line, calculate real-time word-by-word progression
+              const nextLine = lyrics.lines[index + 1];
+              const lineDuration = nextLine ? Math.max(1.2, nextLine.time - line.time) : 4.0;
+              const elapsed = Math.max(0, currentTime - line.time);
+              const progressFraction = Math.min(1, Math.max(0, elapsed / lineDuration));
+
+              const nonSpaceWordCount = words.filter(w => w.trim().length > 0).length || 1;
+              const currentActiveWordTarget = progressFraction * nonSpaceWordCount;
+
+              let wordIndexCounter = 0;
 
               return (
                 <button
                   key={`${line.time}-${index}`}
                   ref={(el) => { lineRefs.current[index] = el; }}
                   onClick={() => onSeek(line.time)}
-                  className={`w-full text-left transition-all duration-500 ease-out group relative py-2 rounded-2xl px-2 focus:outline-none select-none ${
+                  className={`w-full text-left transition-all duration-500 ease-out group relative py-2.5 rounded-2xl px-2 focus:outline-none select-none ${
                     isActive
                       ? 'scale-[1.04] translate-x-1.5 opacity-100 z-10'
                       : isPast
-                      ? 'opacity-35 hover:opacity-85 hover:blur-0'
-                      : 'opacity-25 hover:opacity-80 hover:blur-0'
+                      ? 'opacity-35 hover:opacity-80 hover:blur-0'
+                      : 'opacity-25 hover:opacity-75 hover:blur-0'
                   }`}
                   style={{
                     filter: isActive ? 'blur(0px)' : 'blur(0.8px)'
                   }}
                 >
-                  <span
-                    className={`text-xl md:text-3xl leading-relaxed tracking-tight font-black transition-all duration-300 block ${
-                      isActive
-                        ? isLight
-                          ? 'text-black drop-shadow-md'
-                          : 'text-white drop-shadow-[0_0_35px_rgba(255,255,255,0.95)]'
-                        : isLight
-                        ? 'text-black/40 group-hover:text-black/80'
-                        : 'text-white/40 group-hover:text-white/80'
-                    }`}
-                  >
-                    {line.text}
-                  </span>
+                  <p className="text-xl md:text-3xl leading-relaxed tracking-tight font-black transition-all duration-300 m-0">
+                    {words.map((word, wIdx) => {
+                      const isSpace = word.trim().length === 0;
+                      if (isSpace) {
+                        return <span key={wIdx}>{word}</span>;
+                      }
+
+                      const currentWIdx = wordIndexCounter++;
+                      const isWordSung = isActive && currentWIdx < currentActiveWordTarget;
+                      const isWordActive = isActive && Math.floor(currentActiveWordTarget) === currentWIdx;
+
+                      return (
+                        <span
+                          key={wIdx}
+                          className={`inline-block transition-all duration-150 ${
+                            isActive
+                              ? isWordActive
+                                ? isLight
+                                  ? 'text-black scale-[1.06] font-black drop-shadow-[0_0_12px_rgba(0,0,0,0.6)]'
+                                  : 'text-white scale-[1.06] font-black drop-shadow-[0_0_30px_rgba(255,255,255,1)] brightness-125'
+                                : isWordSung
+                                ? isLight
+                                  ? 'text-black/90 font-black'
+                                  : 'text-white/95 font-black drop-shadow-[0_0_15px_rgba(255,255,255,0.7)]'
+                                : isLight
+                                ? 'text-black/35 font-bold'
+                                : 'text-white/35 font-bold'
+                              : isLight
+                              ? 'text-black/40'
+                              : 'text-white/40'
+                          }`}
+                        >
+                          {word}
+                        </span>
+                      );
+                    })}
+                  </p>
                 </button>
               );
             })}
