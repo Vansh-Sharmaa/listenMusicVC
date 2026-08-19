@@ -158,10 +158,12 @@ apiRouter.post('/music/upload', async (req: Request, res: Response) => {
 
 // GET /api/music/search - Search any song in the world (YouTube Music Engine)
 apiRouter.get('/music/search', async (req: Request, res: Response) => {
-  const query = (req.query.q as string || '').trim();
-  if (!query) {
+  const rawQuery = (req.query.q as string || '').trim();
+  if (!rawQuery) {
     return res.json([]);
   }
+
+  const query = rawQuery.replace(/^(song|track|music|video)\s+/i, '').trim();
 
   const results: Array<{
     id: string;
@@ -173,9 +175,22 @@ apiRouter.get('/music/search', async (req: Request, res: Response) => {
     isRoyaltyFree: boolean;
   }> = [];
 
-  // --- PRIMARY: @distube/ytsr (no API key, returns real YouTube videos) ---
+  // Helper to clean up song titles (e.g. remove "[Official Video]", "(Lyrics)", etc.)
+  const cleanSongTitle = (raw: string) => {
+    return raw
+      .replace(/\[\s*(Official\s*Video|Music\s*Video|Audio|Lyrics|Visualizer|HD|4K|HQ)\s*\]/gi, '')
+      .replace(/\(\s*(Official\s*Video|Music\s*Video|Audio|Lyrics|Visualizer|HD|4K|HQ)\s*\)/gi, '')
+      .replace(/ft\.|feat\./gi, 'feat.')
+      .trim();
+  };
+
+  // --- PRIMARY: @distube/ytsr (Fast, reliable, rich YouTube metadata) ---
   try {
-    const searchResults = await ytsr(query + ' song', { limit: 20 });
+    const searchTarget = query.toLowerCase().includes('song') || query.toLowerCase().includes('music')
+      ? query
+      : `${query} song`;
+
+    const searchResults = await ytsr(searchTarget, { limit: 25 });
     for (const item of searchResults.items) {
       if (item.type !== 'video') continue;
       const video = item as any;
@@ -189,38 +204,45 @@ apiRouter.get('/music/search', async (req: Request, res: Response) => {
         else if (parts.length === 3) durationSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
       }
 
+      // Filter out overly long videos (e.g. 10hr mixes) unless explicitly asked
+      if (!query.toLowerCase().includes('hour') && durationSec > 3600) continue;
+
+      const rawTitle = video.name || video.title || 'Unknown Track';
+      const cleanTitle = cleanSongTitle(rawTitle);
+      const artist = video.author?.name?.replace(/ - Topic$/i, '') || 'YouTube Artist';
+
       results.push({
         id: `yt-${video.id}`,
-        title: video.name || video.title || 'Unknown Song',
-        artist: video.author?.name || 'YouTube Artist',
+        title: cleanTitle || rawTitle,
+        artist,
         url: `https://www.youtube.com/watch?v=${video.id}`,
         duration: durationSec,
-        thumbnail: video.thumbnail?.url || `https://img.youtube.com/vi/${video.id}/hqdefault.jpg`,
+        thumbnail: `https://img.youtube.com/vi/${video.id}/hqdefault.jpg`,
         isRoyaltyFree: false
       });
 
-      if (results.length >= 15) break;
+      if (results.length >= 20) break;
     }
+
     if (results.length > 0) {
       console.log(`[Music Search] ytsr returned ${results.length} results for "${query}"`);
       return res.json(results);
     }
   } catch (ytsrErr) {
-    console.warn('[Music Search] @distube/ytsr failed, falling back to scrape:', ytsrErr);
+    console.warn('[Music Search] @distube/ytsr failed, trying scrape fallback:', ytsrErr);
   }
 
-  // --- FALLBACK 1: HTML Scrape YouTube results page ---
+  // --- FALLBACK 1: YouTube HTML Results Scrape ---
   try {
-    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query + ' song')}`;
+    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query + ' audio')}`;
     const response = await fetch(searchUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9'
       }
     });
     const html = await response.text();
 
-    // Parse ytInitialData from YouTube response
     const jsonMatch = html.match(/ytInitialData\s*=\s*({.+?});<\/script>/s) ||
                       html.match(/var ytInitialData\s*=\s*({.+?});/s);
 
@@ -235,50 +257,39 @@ apiRouter.get('/music/search', async (req: Request, res: Response) => {
               for (const item of items) {
                 const video = item?.videoRenderer;
                 if (video && video.videoId) {
-                  const title = video.title?.runs?.[0]?.text || video.title?.simpleText || 'Unknown Song';
-                  const artist = video.ownerText?.runs?.[0]?.text || video.shortBylineText?.runs?.[0]?.text || 'YouTube Artist';
+                  const rawTitle = video.title?.runs?.[0]?.text || video.title?.simpleText || 'Unknown Song';
+                  const cleanTitle = cleanSongTitle(rawTitle);
+                  const artist = (video.ownerText?.runs?.[0]?.text || video.shortBylineText?.runs?.[0]?.text || 'YouTube Artist').replace(/ - Topic$/i, '');
                   const durationStr = video.lengthText?.simpleText || '3:30';
                   const parts = durationStr.split(':').map(Number);
                   let durationSec = 210;
                   if (parts.length === 2) durationSec = parts[0] * 60 + parts[1];
                   else if (parts.length === 3) durationSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
+                  
                   results.push({
                     id: `yt-${video.videoId}`,
-                    title, artist,
+                    title: cleanTitle,
+                    artist,
                     url: `https://www.youtube.com/watch?v=${video.videoId}`,
                     duration: durationSec,
                     thumbnail: `https://img.youtube.com/vi/${video.videoId}/hqdefault.jpg`,
                     isRoyaltyFree: false
                   });
-                  if (results.length >= 10) break;
+                  if (results.length >= 15) break;
                 }
               }
             }
-            if (results.length >= 10) break;
+            if (results.length >= 15) break;
           }
         }
       } catch (parseErr) {
-        console.warn('[Music Search] JSON parse failed, trying regex fallback');
-      }
-    }
-
-    // Regex fallback
-    if (results.length === 0) {
-      const videoRegex = /"videoId":"([a-zA-Z0-9_-]{11})","thumbnail":.+?"title":{"runs":\[{"text":"(.+?)"}\]}.+?"longBylineText":{"runs":\[{"text":"(.+?)"/g;
-      let match;
-      while ((match = videoRegex.exec(html)) !== null && results.length < 8) {
-        const videoId = match[1];
-        const title = match[2].replace(/\\u0026/g, '&');
-        const artist = match[3].replace(/\\u0026/g, '&');
-        if (!results.some(r => r.id === `yt-${videoId}`)) {
-          results.push({ id: `yt-${videoId}`, title, artist, url: `https://www.youtube.com/watch?v=${videoId}`, duration: 210, thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`, isRoyaltyFree: false });
-        }
+        console.warn('[Music Search] JSON parse failed, trying regex');
       }
     }
 
     if (results.length > 0) return res.json(results);
   } catch (scrapeErr) {
-    console.warn('[Music Search] HTML scrape failed:', scrapeErr);
+    console.warn('[Music Search] YouTube scrape failed:', scrapeErr);
   }
 
   // --- FALLBACK 2: iTunes Search API (reliable, global) ---

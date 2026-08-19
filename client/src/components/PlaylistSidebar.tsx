@@ -773,7 +773,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="e.g. Desi Kalakaar, Starboy, Arijit..."
+              placeholder="e.g. Starboy, Desi Kalakaar, Lo-Fi Girl..."
               className={`flex-1 border rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-fuchsia-500 transition-all ${
                 isLight 
                   ? 'bg-black/5 border-black/10 text-black placeholder-black/40' 
@@ -789,41 +789,102 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
               <span>{isSearching ? 'Searching...' : 'Play'}</span>
             </button>
           </div>
+
+          {/* Quick Mood & Trending Category Chips */}
+          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1">
+            {[
+              { label: '🔥 Trending', query: 'Top Global Hits 2024' },
+              { label: '🌙 Lo-Fi', query: 'Lofi Hip Hop chill study' },
+              { label: '✨ Pop Hits', query: 'Top Pop Music' },
+              { label: '🎧 Hip-Hop', query: 'Hip Hop Rap Hits' },
+              { label: '🕺 Bollywood', query: 'Bollywood Top Hits' },
+              { label: '☕ Chill', query: 'Acoustic Chill Vibes' },
+              { label: '⚡ EDM', query: 'EDM Party Festival' }
+            ].map((chip) => (
+              <button
+                key={chip.label}
+                type="button"
+                onClick={() => setSearchQuery(chip.query)}
+                className={`text-[10px] whitespace-nowrap px-2.5 py-0.5 rounded-full border transition-all active:scale-95 font-medium ${
+                  isLight
+                    ? 'bg-black/5 hover:bg-fuchsia-50 hover:border-fuchsia-300 text-black/70 hover:text-fuchsia-700 border-black/10'
+                    : 'bg-white/5 hover:bg-fuchsia-950/40 hover:border-fuchsia-500/40 text-white/70 hover:text-fuchsia-300 border-white/10'
+                }`}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
         </form>
 
         {/* Live Search Results Dropdown */}
         {searchResults.length > 0 && (
-          <div className={`absolute top-full left-0 right-0 z-50 backdrop-blur-xl rounded-2xl shadow-2xl overflow-hidden max-h-72 overflow-y-auto mt-1 divide-y border ${isLight ? 'bg-white/95 border-fuchsia-300/40 divide-black/10' : 'bg-[#18181b]/95 border-fuchsia-500/40 divide-white/10'}`}>
+          <div className={`absolute top-full left-0 right-0 z-50 backdrop-blur-2xl rounded-2xl shadow-2xl overflow-hidden max-h-80 overflow-y-auto mt-1 divide-y border ${isLight ? 'bg-white/95 border-fuchsia-300/40 divide-black/10' : 'bg-[#18181b]/95 border-fuchsia-500/40 divide-white/10'}`}>
             <div className={`p-2 text-[10px] uppercase tracking-wider font-bold flex items-center justify-between ${isLight ? 'bg-black/5 text-fuchsia-600' : 'bg-white/5 text-fuchsia-300'}`}>
-              <span>Matching Songs</span>
-              <span>Tap to Play for Room</span>
+              <span>Found {searchResults.length} Songs</span>
+              <span>Tap to Play or Queue</span>
             </div>
             {searchResults.map((result) => (
-              <button
+              <div
                 key={result.id}
-                onClick={() => {
-                  setTracks(prev => [result, ...prev.filter(t => t.id !== result.id)]);
-                  handleTrackSelect(result);
-                  setSearchQuery('');
-                  setSearchResults([]);
-                }}
-                className="w-full p-2 text-left hover:bg-fuchsia-600/20 transition-all flex items-center gap-2.5 group"
+                className="w-full p-2 text-left hover:bg-fuchsia-600/15 transition-all flex items-center gap-2.5 group"
               >
                 {result.thumbnail ? (
-                  <img src={result.thumbnail} alt={result.title} className="w-10 h-10 rounded-lg object-cover border border-white/10 flex-shrink-0" />
+                  <img src={result.thumbnail} alt={result.title} className="w-11 h-11 rounded-lg object-cover border border-white/10 flex-shrink-0" />
                 ) : (
-                  <div className="w-10 h-10 rounded-lg bg-fuchsia-900/50 flex items-center justify-center flex-shrink-0">
+                  <div className="w-11 h-11 rounded-lg bg-fuchsia-900/50 flex items-center justify-center flex-shrink-0">
                     <Music size={16} className="text-fuchsia-300" />
                   </div>
                 )}
-                <div className="flex flex-col min-w-0 flex-1">
+                <div
+                  onClick={() => {
+                    setTracks(prev => [result, ...prev.filter(t => t.id !== result.id)]);
+                    handleTrackSelect(result);
+                    setSearchQuery('');
+                    setSearchResults([]);
+                  }}
+                  className="flex flex-col min-w-0 flex-1 cursor-pointer"
+                >
                   <span className={`text-xs font-semibold truncate ${isLight ? 'text-black group-hover:text-fuchsia-700' : 'text-white group-hover:text-fuchsia-200'}`}>{result.title}</span>
-                  <span className={`text-[10px] truncate ${isLight ? 'text-black/50' : 'text-white/50'}`}>{result.artist}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-[10px] truncate max-w-[120px] ${isLight ? 'text-black/50' : 'text-white/50'}`}>{result.artist}</span>
+                    {result.duration > 0 && (
+                      <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-black/20 text-white/40">
+                        {Math.floor(result.duration / 60)}:{(result.duration % 60).toString().padStart(2, '0')}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className="p-1.5 rounded-full bg-fuchsia-600 text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Play size={10} fill="white" />
+
+                <div className="flex items-center gap-1">
+                  {/* Add to Queue Button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      sendMusicAction('queue-add', result.id, 0, result);
+                      alert(`Added "${result.title}" to Up Next queue! 🎶`);
+                    }}
+                    className={`p-1.5 rounded-lg text-[10px] transition-all ${isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white'}`}
+                    title="Add to Up Next Queue"
+                  >
+                    <Plus size={13} />
+                  </button>
+
+                  {/* Play Now Button */}
+                  <button
+                    onClick={() => {
+                      setTracks(prev => [result, ...prev.filter(t => t.id !== result.id)]);
+                      handleTrackSelect(result);
+                      setSearchQuery('');
+                      setSearchResults([]);
+                    }}
+                    className="p-1.5 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-white shadow-md transition-all active:scale-95"
+                    title="Play for Everyone Now"
+                  >
+                    <Play size={13} fill="white" />
+                  </button>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         )}
