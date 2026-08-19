@@ -109,7 +109,7 @@ const RemoteVideoPlayer: React.FC<{
   const showVideo = cameraEnabled !== undefined ? cameraEnabled : isVideoPlaying;
 
   return (
-    <div className="relative w-full h-full flex items-center justify-center bg-[#18181b] overflow-hidden">
+    <div className="relative w-full h-full flex items-center justify-center bg-transparent overflow-hidden">
       {/* Avatar placeholder when camera is OFF */}
       <div className={`absolute inset-0 flex flex-col items-center justify-center gap-2.5 select-none z-0 transition-opacity duration-300 ${showVideo ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         <div className="h-16 w-16 md:h-20 md:w-20 rounded-full bg-gradient-to-br from-fuchsia-600 to-indigo-600 flex items-center justify-center text-xl md:text-2xl font-bold text-white shadow-xl border border-white/20">
