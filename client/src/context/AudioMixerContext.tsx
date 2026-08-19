@@ -53,6 +53,17 @@ export const AudioMixerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [duckingAmount, setDuckingAmount] = useState<number>(0.7); // 70% reduction by default
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
 
+  // Sync refs to avoid stale closures in requestAnimationFrame loops
+  const duckingEnabledRef = useRef(duckingEnabled);
+  const duckingThresholdRef = useRef(duckingThreshold);
+  const duckingAmountRef = useRef(duckingAmount);
+  const isSpeakingRef = useRef(isSpeaking);
+
+  useEffect(() => { duckingEnabledRef.current = duckingEnabled; }, [duckingEnabled]);
+  useEffect(() => { duckingThresholdRef.current = duckingThreshold; }, [duckingThreshold]);
+  useEffect(() => { duckingAmountRef.current = duckingAmount; }, [duckingAmount]);
+  useEffect(() => { isSpeakingRef.current = isSpeaking; }, [isSpeaking]);
+
   // Web Audio Context & Nodes refs
   const audioContextRef = useRef<AudioContext | null>(null);
   
@@ -329,15 +340,16 @@ export const AudioMixerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       const rms = Math.sqrt(sumSquares / bufferLength);
 
-      if (duckingEnabled) {
-        if (rms > duckingThreshold) {
+      if (duckingEnabledRef.current) {
+        if (rms > duckingThresholdRef.current) {
           // Speech detected!
           lastActiveSpeechRef.current = Date.now();
           
-          if (!isSpeaking) {
+          if (!isSpeakingRef.current) {
             setIsSpeaking(true);
+            isSpeakingRef.current = true;
             // Lower music volume: target value = 1.0 - duckingAmount (e.g. 1.0 - 0.7 = 0.3)
-            const targetVolume = Math.max(0.05, 1.0 - duckingAmount);
+            const targetVolume = Math.max(0.05, 1.0 - duckingAmountRef.current);
             if (duckingGainNodeRef.current) {
               duckingGainNodeRef.current.gain.setTargetAtTime(targetVolume, ctx.currentTime, 0.1);
             }
@@ -350,10 +362,11 @@ export const AudioMixerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           }
         } else {
           // Silence or ambient noise
-          if (isSpeaking && !speechEndTimeoutRef.current) {
+          if (isSpeakingRef.current && !speechEndTimeoutRef.current) {
             // Wait 1.5s (hold time) of silence before restoring music volume
             speechEndTimeoutRef.current = setTimeout(() => {
               setIsSpeaking(false);
+              isSpeakingRef.current = false;
               if (duckingGainNodeRef.current && audioContextRef.current) {
                 duckingGainNodeRef.current.gain.setTargetAtTime(1.0, audioContextRef.current.currentTime, 0.3);
               }
