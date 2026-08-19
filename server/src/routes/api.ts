@@ -154,3 +154,112 @@ apiRouter.post('/music/upload', async (req: Request, res: Response) => {
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
+// GET /api/music/search - Search any song in the world (YouTube Music Engine)
+apiRouter.get('/music/search', async (req: Request, res: Response) => {
+  const query = (req.query.q as string || '').trim();
+  if (!query) {
+    return res.json([]);
+  }
+
+  try {
+    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query + ' song')}`;
+    const response = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+      }
+    });
+
+    const html = await response.text();
+    const results: Array<{
+      id: string;
+      title: string;
+      artist: string;
+      url: string;
+      duration: number;
+      thumbnail: string;
+      isRoyaltyFree: boolean;
+    }> = [];
+
+    // Parse ytInitialData from YouTube response
+    const jsonMatch = html.match(/ytInitialData\s*=\s*({.+?});<\/script>/s) ||
+                      html.match(/var ytInitialData\s*=\s*({.+?});/s);
+
+    if (jsonMatch && jsonMatch[1]) {
+      try {
+        const data = JSON.parse(jsonMatch[1]);
+        const sectionContents = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents;
+        
+        if (Array.isArray(sectionContents)) {
+          for (const section of sectionContents) {
+            const items = section?.itemSectionRenderer?.contents;
+            if (Array.isArray(items)) {
+              for (const item of items) {
+                const video = item?.videoRenderer;
+                if (video && video.videoId) {
+                  const title = video.title?.runs?.[0]?.text || video.title?.simpleText || 'Unknown Song';
+                  const artist = video.ownerText?.runs?.[0]?.text || video.shortBylineText?.runs?.[0]?.text || 'YouTube Artist';
+                  const durationStr = video.lengthText?.simpleText || '3:30';
+                  
+                  // Parse duration "MM:SS" or "HH:MM:SS" into seconds
+                  const parts = durationStr.split(':').map(Number);
+                  let durationSec = 210;
+                  if (parts.length === 2) {
+                    durationSec = parts[0] * 60 + parts[1];
+                  } else if (parts.length === 3) {
+                    durationSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
+                  }
+
+                  results.push({
+                    id: `yt-${video.videoId}`,
+                    title,
+                    artist,
+                    url: `https://www.youtube.com/watch?v=${video.videoId}`,
+                    duration: durationSec,
+                    thumbnail: `https://img.youtube.com/vi/${video.videoId}/hqdefault.jpg`,
+                    isRoyaltyFree: false
+                  });
+
+                  if (results.length >= 10) break;
+                }
+              }
+            }
+            if (results.length >= 10) break;
+          }
+        }
+      } catch (parseErr) {
+        console.warn('[Music Search] JSON parse failed, falling back to regex:', parseErr);
+      }
+    }
+
+    // Regex fallback if initialData JSON format shifted
+    if (results.length === 0) {
+      const videoRegex = /"videoId":"([a-zA-Z0-9_-]{11})","thumbnail":.+?"title":{"runs":\[{"text":"(.+?)"}\]}.+?"longBylineText":{"runs":\[{"text":"(.+?)"/g;
+      let match;
+      while ((match = videoRegex.exec(html)) !== null && results.length < 8) {
+        const videoId = match[1];
+        const title = match[2].replace(/\\u0026/g, '&');
+        const artist = match[3].replace(/\\u0026/g, '&');
+
+        if (!results.some(r => r.id === `yt-${videoId}`)) {
+          results.push({
+            id: `yt-${videoId}`,
+            title,
+            artist,
+            url: `https://www.youtube.com/watch?v=${videoId}`,
+            duration: 210,
+            thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+            isRoyaltyFree: false
+          });
+        }
+      }
+    }
+
+    return res.json(results);
+  } catch (err) {
+    console.error('[Music Search] Exception:', err);
+    return res.status(500).json({ error: 'Search failed' });
+  }
+});
+

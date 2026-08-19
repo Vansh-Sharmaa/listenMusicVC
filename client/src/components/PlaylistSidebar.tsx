@@ -3,9 +3,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useSocket } from '../context/SocketContext';
 import { useAudioMixer } from '../context/AudioMixerContext';
-import { Play, Pause, Music, Upload, Loader2, Plus, Volume2, Link as LinkIcon, Radio, Share2 } from 'lucide-react';
+import { Play, Pause, Music, Upload, Loader2, Plus, Volume2, Link as LinkIcon, Radio, Share2, Disc } from 'lucide-react';
 
-import { parseMediaUrl, extractYouTubeId, isYouTubeUrl, isSpotifyUrl, isMonochromeUrl } from '../utils/mediaPlatform';
+import { parseMediaUrl, extractYouTubeId, isYouTubeUrl, isSpotifyUrl, isMonochromeUrl, extractSpotifyInfo } from '../utils/mediaPlatform';
 
 interface MusicTrack {
   id: string;
@@ -342,60 +342,110 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
     }
   };
 
-  // Quick Play handler: immediately starts playing any YouTube, Spotify, SoundCloud, or Monochrome / Lossless audio link
-  const handleQuickPlay = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!quickUrl.trim()) return;
+  // Live Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<MusicTrack[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
-    const trimmed = quickUrl.trim();
-    const media = parseMediaUrl(trimmed);
-    
-    let newTrack: MusicTrack;
-    if (media.platform === 'youtube' && media.id) {
-      newTrack = {
-        id: `yt-${media.id}-${Date.now()}`,
-        title: 'YouTube Track',
-        artist: 'YouTube Music',
-        url: trimmed,
-        duration: 300,
-        isRoyaltyFree: false,
-        thumbnail: `https://img.youtube.com/vi/${media.id}/hqdefault.jpg`
-      };
-    } else if (media.platform === 'spotify') {
-      newTrack = {
-        id: `spotify-${media.id}-${Date.now()}`,
-        title: 'Spotify Track',
-        artist: 'Spotify',
-        url: trimmed,
-        duration: 240,
-        isRoyaltyFree: false,
-        thumbnail: 'https://open.spotifycdn.com/cdn/images/favicon32.8e66b099.png'
-      };
-    } else if (media.platform === 'soundcloud') {
-      newTrack = {
-        id: `sc-${Date.now()}`,
-        title: 'SoundCloud Track',
-        artist: 'SoundCloud',
-        url: trimmed,
-        duration: 240,
-        isRoyaltyFree: false,
-        thumbnail: 'https://a-v2.sndcdn.com/assets/images/sc-icons/favicon-2cadd14bdb.ico'
-      };
-    } else {
-      // Monochrome / Direct Lossless / Web Audio Stream
-      newTrack = {
-        id: `stream-${Date.now()}`,
-        title: trimmed.includes('monochrome') ? 'Monochrome Stream' : 'Lossless Audio Stream',
-        artist: 'High-Fidelity Audio',
-        url: trimmed,
-        duration: 300,
-        isRoyaltyFree: true
-      };
+  // Debounced search handler
+  useEffect(() => {
+    if (!searchQuery.trim() || searchQuery.trim().startsWith('http')) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
     }
 
-    setTracks(prev => [newTrack, ...prev]);
-    handleTrackSelect(newTrack);
-    setQuickUrl('');
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const serverUrl = (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '');
+        const res = await fetch(`${serverUrl}/api/music/search?q=${encodeURIComponent(searchQuery.trim())}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSearchResults(data);
+        }
+      } catch (e) {
+        console.warn('Search query error:', e);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Handle Quick Play or Search Submit
+  const handleQuickPlay = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const query = searchQuery.trim();
+    if (!query) return;
+
+    // If direct link entered
+    if (query.startsWith('http://') || query.startsWith('https://')) {
+      let newTrack: MusicTrack;
+      const ytId = extractYouTubeId(query);
+      const spotifyInfo = extractSpotifyInfo(query);
+
+      if (ytId) {
+        newTrack = {
+          id: `yt-${ytId}`,
+          title: `YouTube Track (${ytId})`,
+          artist: 'YouTube',
+          url: `https://www.youtube.com/watch?v=${ytId}`,
+          duration: 240,
+          isRoyaltyFree: false,
+          thumbnail: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`
+        };
+      } else if (spotifyInfo) {
+        newTrack = {
+          id: `spotify-${spotifyInfo.id}`,
+          title: `Spotify Track (${spotifyInfo.id})`,
+          artist: 'Spotify',
+          url: query,
+          duration: 210,
+          isRoyaltyFree: false,
+          thumbnail: 'https://open.spotifycdn.com/cdn/images/favicon32.8e66b099.png'
+        };
+      } else {
+        newTrack = {
+          id: `stream-${Date.now()}`,
+          title: 'Direct Online Stream',
+          artist: 'Web Audio',
+          url: query,
+          duration: 300,
+          isRoyaltyFree: true
+        };
+      }
+
+      setTracks(prev => [newTrack, ...prev.filter(t => t.id !== newTrack.id)]);
+      handleTrackSelect(newTrack);
+      setSearchQuery('');
+      setSearchResults([]);
+      return;
+    }
+
+    // Otherwise, perform live song search and play top result
+    setIsSearching(true);
+    try {
+      const serverUrl = (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '');
+      const res = await fetch(`${serverUrl}/api/music/search?q=${encodeURIComponent(query)}`);
+      if (res.ok) {
+        const results = await res.json();
+        if (Array.isArray(results) && results.length > 0) {
+          const topSong = results[0];
+          setTracks(prev => [topSong, ...prev.filter(t => t.id !== topSong.id)]);
+          handleTrackSelect(topSong);
+          setSearchQuery('');
+          setSearchResults([]);
+        } else {
+          alert(`No tracks found for "${query}". Try another song name or paste a direct YouTube link!`);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to search song:', err);
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   return (
@@ -415,30 +465,67 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
         </button>
       </div>
 
-      {/* Instant Multi-Platform Song Link Bar */}
-      <div className="p-3 bg-gradient-to-b from-fuchsia-950/40 to-black/20 border-b border-white/10">
+      {/* Instant Live Song Search & URL Bar */}
+      <div className="p-3 bg-gradient-to-b from-fuchsia-950/40 to-black/20 border-b border-white/10 relative">
         <form onSubmit={handleQuickPlay} className="space-y-2">
           <div className="flex items-center justify-between text-[11px] text-fuchsia-300 font-semibold px-0.5">
-            <span>⚡ YouTube, Spotify, SoundCloud, Monochrome</span>
+            <span>🔍 Search ANY Song in the World or Paste Link</span>
           </div>
           <div className="flex gap-1.5">
             <input
               type="text"
-              value={quickUrl}
-              onChange={(e) => setQuickUrl(e.target.value)}
-              placeholder="Paste Spotify, YouTube, or Stream link..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="e.g. Desi Kalakaar, Starboy, Arijit..."
               className="flex-1 bg-white/10 border border-white/15 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder-white/40 focus:outline-none focus:border-fuchsia-500 transition-all"
             />
             <button
               type="submit"
-              disabled={!quickUrl.trim()}
-              className="bg-fuchsia-600 hover:bg-fuchsia-500 disabled:opacity-40 text-white text-xs px-3 py-1.5 rounded-xl font-bold transition-all active:scale-95 shadow-md shadow-fuchsia-950/40 flex items-center gap-1"
+              disabled={!searchQuery.trim() || isSearching}
+              className="bg-fuchsia-600 hover:bg-fuchsia-500 disabled:opacity-40 text-white text-xs px-3 py-1.5 rounded-xl font-bold transition-all active:scale-95 shadow-md shadow-fuchsia-950/40 flex items-center gap-1 flex-shrink-0"
             >
-              <Play size={12} fill="white" />
-              <span>Play</span>
+              {isSearching ? <Disc size={12} className="animate-spin" /> : <Play size={12} fill="white" />}
+              <span>{isSearching ? 'Searching...' : 'Play'}</span>
             </button>
           </div>
         </form>
+
+        {/* Live Search Results Dropdown */}
+        {searchResults.length > 0 && (
+          <div className="absolute top-full left-0 right-0 z-50 bg-[#18181b]/95 border border-fuchsia-500/40 backdrop-blur-xl rounded-2xl shadow-2xl overflow-hidden max-h-72 overflow-y-auto mt-1 divide-y divide-white/10">
+            <div className="p-2 bg-white/5 text-[10px] uppercase tracking-wider font-bold text-fuchsia-300 flex items-center justify-between">
+              <span>Matching Songs</span>
+              <span>Tap to Play for Room</span>
+            </div>
+            {searchResults.map((result) => (
+              <button
+                key={result.id}
+                onClick={() => {
+                  setTracks(prev => [result, ...prev.filter(t => t.id !== result.id)]);
+                  handleTrackSelect(result);
+                  setSearchQuery('');
+                  setSearchResults([]);
+                }}
+                className="w-full p-2 text-left hover:bg-fuchsia-600/20 transition-all flex items-center gap-2.5 group"
+              >
+                {result.thumbnail ? (
+                  <img src={result.thumbnail} alt={result.title} className="w-10 h-10 rounded-lg object-cover border border-white/10 flex-shrink-0" />
+                ) : (
+                  <div className="w-10 h-10 rounded-lg bg-fuchsia-900/50 flex items-center justify-center flex-shrink-0">
+                    <Music size={16} className="text-fuchsia-300" />
+                  </div>
+                )}
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-xs font-semibold text-white group-hover:text-fuchsia-200 truncate">{result.title}</span>
+                  <span className="text-[10px] text-white/50 truncate">{result.artist}</span>
+                </div>
+                <div className="p-1.5 rounded-full bg-fuchsia-600 text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Play size={10} fill="white" />
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Share Spotify / Laptop Audio Action Banner */}
