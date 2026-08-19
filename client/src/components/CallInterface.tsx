@@ -483,6 +483,32 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     return () => clearInterval(checkInterval);
   }, []);
 
+  // Global Mobile Touch / Tap gesture unlocker for AudioContext & YouTube
+  useEffect(() => {
+    const unlockAudio = () => {
+      if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume().catch(() => {});
+      }
+      if (ytPlayerRef.current && ytPlayerReadyRef.current) {
+        try {
+          if (musicState.isPlaying) {
+            ytPlayerRef.current.playVideo();
+          }
+        } catch (_) {}
+      }
+      if (musicAudioRef.current && musicState.isPlaying) {
+        musicAudioRef.current.play().catch(() => {});
+      }
+    };
+
+    window.addEventListener('click', unlockAudio, { passive: true });
+    window.addEventListener('touchstart', unlockAudio, { passive: true });
+    return () => {
+      window.removeEventListener('click', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
+    };
+  }, [audioContext, musicState.isPlaying]);
+
   // Sync music element with Web Audio mixer
   useEffect(() => {
     if (musicAudioRef.current) {
@@ -716,24 +742,16 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
           if (musicState.isPlaying) {
             ytPlayerRef.current.playVideo();
+            if (ytPlayerRef.current.setPlaybackRate) {
+              ytPlayerRef.current.setPlaybackRate(1.0);
+            }
+
             const currentPos = ytPlayerRef.current.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : 0;
             const drift = targetPos - currentPos;
 
-            // 3-Tier Drift Management Policy
-            if (Math.abs(drift) > 1.2) {
-              // Tier 3: Major drift (> 1.2s) -> Hard seek
+            // Pure, distortion-free hard seek when drift exceeds 1 second
+            if (Math.abs(drift) > 1.0) {
               ytPlayerRef.current.seekTo(targetPos, true);
-              if (ytPlayerRef.current.setPlaybackRate) ytPlayerRef.current.setPlaybackRate(1.0);
-            } else if (Math.abs(drift) > 0.25) {
-              // Tier 2: Medium drift (250ms - 1.2s) -> Smooth rate nudge without stuttering
-              if (ytPlayerRef.current.setPlaybackRate) {
-                ytPlayerRef.current.setPlaybackRate(drift > 0 ? 1.04 : 0.96);
-              }
-            } else {
-              // Tier 1: Perfect sync zone (< 250ms) -> Normal rate
-              if (ytPlayerRef.current.setPlaybackRate) {
-                ytPlayerRef.current.setPlaybackRate(1.0);
-              }
             }
           } else {
             ytPlayerRef.current.pauseVideo();
