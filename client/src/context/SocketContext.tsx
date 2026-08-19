@@ -29,6 +29,7 @@ interface MusicState {
     url: string;
     duration: number;
     isRoyaltyFree?: boolean;
+    thumbnail?: string;
   } | null;
 }
 

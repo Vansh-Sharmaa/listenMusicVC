@@ -5,6 +5,8 @@ import { useSocket } from '../context/SocketContext';
 import { useAudioMixer } from '../context/AudioMixerContext';
 import { Play, Pause, Music, Upload, Loader2, Plus, Volume2, Link as LinkIcon, Radio, Share2 } from 'lucide-react';
 
+import { extractYouTubeId, isYouTubeUrl } from '../utils/youtube';
+
 interface MusicTrack {
   id: string;
   title: string;
@@ -12,6 +14,7 @@ interface MusicTrack {
   url: string;
   duration: number;
   isRoyaltyFree: boolean;
+  thumbnail?: string;
 }
 
 interface PlaylistSidebarProps {
@@ -24,6 +27,9 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
 
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Quick YouTube / Song URL input bar
+  const [quickUrl, setQuickUrl] = useState('');
 
   // Tab mode: 'online' | 'upload'
   const [modalTab, setModalTab] = useState<'online' | 'upload'>('online');
@@ -40,12 +46,62 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
   const [uploadArtist, setUploadArtist] = useState('');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
 
-  // Audio elements
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const isSyncingRef = useRef(false);
-
-  // Curated list of live online music streams
+  // Curated list of popular hits & live online music streams
   const onlinePresetTracks: MusicTrack[] = [
+    {
+      id: 'yt-chase-atlantic-slide',
+      title: 'SLIDE',
+      artist: 'Chase Atlantic',
+      url: 'https://www.youtube.com/watch?v=tOVIeLZtxDc',
+      duration: 210,
+      isRoyaltyFree: false,
+      thumbnail: 'https://img.youtube.com/vi/tOVIeLZtxDc/hqdefault.jpg'
+    },
+    {
+      id: 'yt-drake-massive',
+      title: 'Massive',
+      artist: 'Drake',
+      url: 'https://www.youtube.com/watch?v=ay1l_u6vltY',
+      duration: 336,
+      isRoyaltyFree: false,
+      thumbnail: 'https://img.youtube.com/vi/ay1l_u6vltY/hqdefault.jpg'
+    },
+    {
+      id: 'yt-future-weeknd',
+      title: "We Still Don't Trust You",
+      artist: 'Future, Metro Boomin, The Weeknd',
+      url: 'https://www.youtube.com/watch?v=mq4wClhFmA8',
+      duration: 252,
+      isRoyaltyFree: false,
+      thumbnail: 'https://img.youtube.com/vi/mq4wClhFmA8/hqdefault.jpg'
+    },
+    {
+      id: 'yt-tricksingh-taaj',
+      title: 'TAAJ (Official Music Video)',
+      artist: 'Tricksingh',
+      url: 'https://www.youtube.com/watch?v=Du8E8g2LVoU',
+      duration: 198,
+      isRoyaltyFree: false,
+      thumbnail: 'https://img.youtube.com/vi/Du8E8g2LVoU/hqdefault.jpg'
+    },
+    {
+      id: 'yt-the-weeknd-blinding',
+      title: 'Blinding Lights',
+      artist: 'The Weeknd',
+      url: 'https://www.youtube.com/watch?v=4NRXx6U8ABQ',
+      duration: 200,
+      isRoyaltyFree: false,
+      thumbnail: 'https://img.youtube.com/vi/4NRXx6U8ABQ/hqdefault.jpg'
+    },
+    {
+      id: 'yt-lofi-girl',
+      title: 'Lofi Hip Hop / Study Beats',
+      artist: 'Lofi Girl Live',
+      url: 'https://www.youtube.com/watch?v=jfKfPfyJRdk',
+      duration: 14400,
+      isRoyaltyFree: true,
+      thumbnail: 'https://img.youtube.com/vi/jfKfPfyJRdk/hqdefault.jpg'
+    },
     {
       id: 'online-1',
       title: 'Lofi Chill Study Beats',
@@ -68,14 +124,6 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
       artist: 'MDN Audio',
       url: 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3',
       duration: 302,
-      isRoyaltyFree: true,
-    },
-    {
-      id: 'online-4',
-      title: 'SoundHelix Acoustic Stream',
-      artist: 'SoundHelix Live',
-      url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-      duration: 502,
       isRoyaltyFree: true,
     }
   ];
@@ -220,6 +268,41 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
     }
   };
 
+  // Quick Play handler: immediately starts playing any YouTube link or audio URL for everyone
+  const handleQuickPlay = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickUrl.trim()) return;
+
+    const trimmed = quickUrl.trim();
+    const ytId = extractYouTubeId(trimmed);
+    
+    let newTrack: MusicTrack;
+    if (ytId) {
+      newTrack = {
+        id: `yt-${ytId}-${Date.now()}`,
+        title: 'YouTube Track',
+        artist: 'YouTube Music',
+        url: trimmed,
+        duration: 300,
+        isRoyaltyFree: false,
+        thumbnail: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`
+      };
+    } else {
+      newTrack = {
+        id: `custom-${Date.now()}`,
+        title: 'Custom Audio Stream',
+        artist: 'Web Audio',
+        url: trimmed,
+        duration: 300,
+        isRoyaltyFree: true
+      };
+    }
+
+    setTracks(prev => [newTrack, ...prev]);
+    handleTrackSelect(newTrack);
+    setQuickUrl('');
+  };
+
   return (
     <div className="flex flex-col h-full bg-black/40 border-l border-white/10 backdrop-blur-md text-white w-80">
       {/* Header */}
@@ -231,19 +314,45 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
         <button
           onClick={() => setShowAddModal(true)}
           className="bg-fuchsia-600 hover:bg-fuchsia-500 transition-all p-1.5 rounded-lg active:scale-95 flex items-center justify-center text-white shadow-md shadow-fuchsia-950/40"
-          title="Add Song / Online Link"
+          title="Add Custom Track"
         >
           <Plus size={16} />
         </button>
       </div>
 
+      {/* Instant YouTube & Song Link Bar */}
+      <div className="p-3 bg-gradient-to-b from-fuchsia-950/40 to-black/20 border-b border-white/10">
+        <form onSubmit={handleQuickPlay} className="space-y-2">
+          <div className="flex items-center justify-between text-[11px] text-fuchsia-300 font-semibold px-0.5">
+            <span>⚡ Play Any YouTube / Song Link</span>
+          </div>
+          <div className="flex gap-1.5">
+            <input
+              type="text"
+              value={quickUrl}
+              onChange={(e) => setQuickUrl(e.target.value)}
+              placeholder="Paste YouTube link here..."
+              className="flex-1 bg-white/10 border border-white/15 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder-white/40 focus:outline-none focus:border-fuchsia-500 transition-all"
+            />
+            <button
+              type="submit"
+              disabled={!quickUrl.trim()}
+              className="bg-fuchsia-600 hover:bg-fuchsia-500 disabled:opacity-40 text-white text-xs px-3 py-1.5 rounded-xl font-bold transition-all active:scale-95 shadow-md shadow-fuchsia-950/40 flex items-center gap-1"
+            >
+              <Play size={12} fill="white" />
+              <span>Play</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
       {/* Share Spotify / Laptop Audio Action Banner */}
-      <div className="p-3 bg-gradient-to-r from-fuchsia-950/30 to-emerald-950/30 border-b border-white/10">
+      <div className="p-2.5 bg-gradient-to-r from-fuchsia-950/20 to-emerald-950/20 border-b border-white/10">
         <button
           onClick={handleShareSpotifyAudio}
-          className="w-full bg-white/10 hover:bg-white/15 border border-white/10 rounded-xl p-2.5 flex items-center justify-center gap-2 text-xs font-semibold text-emerald-300 hover:text-emerald-200 transition-all active:scale-95 shadow-inner"
+          className="w-full bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-2 flex items-center justify-center gap-2 text-xs font-semibold text-emerald-300 hover:text-emerald-200 transition-all active:scale-95"
         >
-          <Share2 size={14} className="text-emerald-400" />
+          <Share2 size={13} className="text-emerald-400" />
           <span>Stream Spotify / Desktop Audio</span>
         </button>
       </div>
@@ -254,11 +363,24 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
           <div className="space-y-3">
             <span className="text-[10px] text-fuchsia-400 uppercase tracking-widest font-bold flex items-center gap-1">
               <Radio size={12} className="animate-pulse" />
-              Now Streaming
+              Now Streaming in Room
             </span>
-            <div className="flex flex-col">
-              <span className="font-semibold text-sm truncate">{activeTrack.title}</span>
-              <span className="text-xs text-white/50 truncate">{activeTrack.artist}</span>
+            <div className="flex items-center gap-3">
+              {(activeTrack as any)?.thumbnail ? (
+                <img
+                  src={(activeTrack as any).thumbnail}
+                  alt={activeTrack.title}
+                  className="w-12 h-12 rounded-lg object-cover border border-white/10 shadow-md flex-shrink-0"
+                />
+              ) : (
+                <div className="w-12 h-12 rounded-lg bg-fuchsia-600/30 border border-fuchsia-500/30 flex items-center justify-center flex-shrink-0 text-fuchsia-300">
+                  <Music size={20} />
+                </div>
+              )}
+              <div className="flex flex-col min-w-0 flex-1">
+                <span className="font-semibold text-sm truncate">{activeTrack.title}</span>
+                <span className="text-xs text-white/50 truncate">{activeTrack.artist}</span>
+              </div>
             </div>
             
             {/* Playback Controls */}
@@ -267,14 +389,14 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
                 onClick={handlePlayPause}
                 className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white rounded-full p-2.5 transition-all duration-300 hover:scale-105 active:scale-95 shadow-md shadow-fuchsia-950/30"
               >
-                {musicState.isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                {musicState.isPlaying ? <Pause size={18} fill="white" /> : <Play size={18} fill="white" />}
               </button>
             </div>
           </div>
         ) : (
-          <div className="text-center text-xs text-white/40 py-4 italic flex flex-col items-center gap-1.5">
-            <Volume2 size={24} className="text-white/20 animate-pulse" />
-            No track playing. Select an online stream below.
+          <div className="text-center text-xs text-white/40 py-3 italic flex flex-col items-center gap-1.5">
+            <Volume2 size={22} className="text-white/20 animate-pulse" />
+            No track playing. Click a song below or paste any YouTube link!
           </div>
         )}
       </div>
@@ -282,7 +404,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
       {/* Online Streams & Tracks List */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         <span className="text-xs font-semibold text-white/40 px-1 uppercase tracking-wider block mb-2">
-          Online Music & Streams
+          Featured & Trending Tracks
         </span>
         {loading ? (
           <div className="flex items-center justify-center py-10 text-white/30 text-xs">
@@ -292,26 +414,42 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
         ) : (
           tracks.map((track) => {
             const isCurrent = track.id === musicState.currentTrackId;
+            const isYT = isYouTubeUrl(track.url);
             return (
               <button
                 key={track.id}
                 onClick={() => handleTrackSelect(track)}
-                className={`w-full text-left p-3 rounded-xl flex items-center justify-between group transition-all duration-300 ${
+                className={`w-full text-left p-2.5 rounded-xl flex items-center gap-3 group transition-all duration-300 ${
                   isCurrent
-                    ? 'bg-fuchsia-600/20 border border-fuchsia-500/30 text-white'
+                    ? 'bg-fuchsia-600/25 border border-fuchsia-500/40 text-white shadow-lg'
                     : 'hover:bg-white/5 border border-transparent text-white/70 hover:text-white'
                 }`}
               >
+                {track.thumbnail ? (
+                  <img
+                    src={track.thumbnail}
+                    alt={track.title}
+                    className="w-10 h-10 rounded-lg object-cover border border-white/10 flex-shrink-0"
+                  />
+                ) : (
+                  <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center flex-shrink-0 text-white/40 group-hover:text-fuchsia-300">
+                    <Music size={16} />
+                  </div>
+                )}
                 <div className="flex flex-col min-w-0 flex-1">
-                  <span className={`text-sm font-medium truncate ${isCurrent ? 'text-fuchsia-300' : ''}`}>
+                  <span className={`text-xs font-semibold truncate ${isCurrent ? 'text-fuchsia-200 font-bold' : ''}`}>
                     {track.title}
                   </span>
-                  <span className="text-[11px] text-white/40 group-hover:text-white/50 truncate">
+                  <span className="text-[11px] text-white/40 group-hover:text-white/60 truncate">
                     {track.artist}
                   </span>
                 </div>
-                <span className="text-[9px] bg-fuchsia-500/10 border border-fuchsia-500/20 px-1.5 py-0.5 rounded text-fuchsia-300 ml-2 font-mono uppercase">
-                  ONLINE
+                <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase font-bold ${
+                  isYT 
+                    ? 'bg-red-500/20 text-red-300 border border-red-500/30'
+                    : 'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30'
+                }`}>
+                  {isYT ? 'YOUTUBE' : 'AUDIO'}
                 </span>
               </button>
             );

@@ -7,6 +7,7 @@ import { ChatSidebar } from './ChatSidebar';
 import { PlaylistSidebar } from './PlaylistSidebar';
 import { AudioMixerPanel } from './AudioMixerPanel';
 import { ReactionOverlay } from './ReactionOverlay';
+import { extractYouTubeId, isYouTubeUrl } from '../utils/youtube';
 import {
   Mic,
   MicOff,
@@ -20,7 +21,13 @@ import {
   Smile,
   Users,
   Tv,
-  Copy
+  Copy,
+  Play,
+  Pause,
+  Radio,
+  Eye,
+  EyeOff,
+  Volume2
 } from 'lucide-react';
 
 interface CallInterfaceProps {
@@ -126,7 +133,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   onLeave
 }) => {
   // Context hooks
-  const { socket, joinRoom, sendReaction, participants, isConnected, musicState, getServerTime } = useSocket();
+  const { socket, joinRoom, sendReaction, participants, isConnected, musicState, sendMusicAction, getServerTime } = useSocket();
   const {
     initAudio,
     processLocalMicTrack,
@@ -402,6 +409,22 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, userId, username, audioContext]);
 
+  // YouTube Synchronized Player state & refs
+  const [showYtVideo, setShowYtVideo] = useState(true);
+  const ytPlayerRef = useRef<any>(null);
+  const ytPlayerReadyRef = useRef<boolean>(false);
+  const currentYtVideoIdRef = useRef<string | null>(null);
+
+  // Load YouTube IFrame API script once
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !(window as any).YT) {
+      const tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      const firstScriptTag = document.getElementsByTagName('script')[0];
+      firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
+    }
+  }, []);
+
   // Sync music element with Web Audio mixer
   useEffect(() => {
     if (musicAudioRef.current) {
@@ -409,20 +432,27 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     }
   }, [musicAudioRef.current, registerMusicElement]);
 
-  // Apply volume changes to permanent music audio element
+  // Apply volume changes to permanent music audio element & YouTube player
   useEffect(() => {
     if (musicAudioRef.current) {
       musicAudioRef.current.volume = Math.max(0, Math.min(1, musicVolume));
     }
+    if (ytPlayerRef.current && ytPlayerReadyRef.current) {
+      try {
+        ytPlayerRef.current.setVolume(Math.max(0, Math.min(100, Math.round(musicVolume * 100))));
+      } catch (_) {}
+    }
   }, [musicVolume]);
 
-  // Permanent Shared Music Playback Synchronization (always running)
+  // Permanent Shared Music Playback Synchronization (YouTube + HTML5 Audio)
   useEffect(() => {
     const audio = musicAudioRef.current;
-    if (!audio) return;
 
     if (!musicState.currentTrackId && !musicState.currentTrack) {
-      if (!audio.paused) audio.pause();
+      if (audio && !audio.paused) audio.pause();
+      if (ytPlayerRef.current && ytPlayerReadyRef.current) {
+        try { ytPlayerRef.current.pauseVideo(); } catch (_) {}
+      }
       return;
     }
 
@@ -433,10 +463,15 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     // Fallback URL preset lookup if trackData wasn't attached
     if (!trackUrl && musicState.currentTrackId) {
       const presetList: Record<string, string> = {
+        'yt-chase-atlantic-slide': 'https://www.youtube.com/watch?v=tOVIeLZtxDc',
+        'yt-drake-massive': 'https://www.youtube.com/watch?v=ay1l_u6vltY',
+        'yt-future-weeknd': 'https://www.youtube.com/watch?v=mq4wClhFmA8',
+        'yt-tricksingh-taaj': 'https://www.youtube.com/watch?v=Du8E8g2LVoU',
+        'yt-the-weeknd-blinding': 'https://www.youtube.com/watch?v=4NRXx6U8ABQ',
+        'yt-lofi-girl': 'https://www.youtube.com/watch?v=jfKfPfyJRdk',
         'online-1': 'https://ia802802.us.archive.org/5/items/lofi-study-112191/lofi-study-112191.mp3',
         'online-2': 'https://ia800905.us.archive.org/19/items/FREE_background_music_loops/chill_groove.mp3',
         'online-3': 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3',
-        'online-4': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
         'rf-1': 'https://ia802802.us.archive.org/5/items/lofi-study-112191/lofi-study-112191.mp3',
         'rf-2': 'https://ia800905.us.archive.org/19/items/FREE_background_music_loops/chill_groove.mp3',
         'rf-3': 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3',
@@ -449,9 +484,101 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     }
 
     if (!trackUrl) {
-      if (!audio.paused) audio.pause();
+      if (audio && !audio.paused) audio.pause();
       return;
     }
+
+    const ytId = extractYouTubeId(trackUrl);
+
+    // ───────────────────────────────────────────
+    // Path A: Synchronized YouTube Video & Audio
+    // ───────────────────────────────────────────
+    if (ytId) {
+      if (audio && !audio.paused) audio.pause();
+
+      const elapsed = (getServerTime() - Number(musicState.lastPositionUpdatedAt || Date.now())) / 1000;
+      const targetPos = Math.max(0, (musicState.lastPosition || 0) + (musicState.isPlaying ? elapsed : 0));
+
+      const initOrSyncYT = () => {
+        if (!ytPlayerRef.current) {
+          if ((window as any).YT && (window as any).YT.Player) {
+            try {
+              ytPlayerRef.current = new (window as any).YT.Player('youtube-sync-player', {
+                height: '100%',
+                width: '100%',
+                videoId: ytId,
+                playerVars: {
+                  autoplay: musicState.isPlaying ? 1 : 0,
+                  controls: 1,
+                  disablekb: 0,
+                  modestbranding: 1,
+                  rel: 0,
+                  playsinline: 1,
+                  start: Math.floor(targetPos)
+                },
+                events: {
+                  onReady: (event: any) => {
+                    ytPlayerReadyRef.current = true;
+                    currentYtVideoIdRef.current = ytId;
+                    event.target.setVolume(Math.max(0, Math.min(100, Math.round(musicVolume * 100))));
+                    if (musicState.isPlaying) {
+                      event.target.playVideo();
+                    } else {
+                      event.target.pauseVideo();
+                    }
+                  },
+                  onError: (err: any) => {
+                    console.warn('[YouTube Player] Error:', err);
+                  }
+                }
+              });
+            } catch (e) {
+              console.warn('[YouTube] Player initialization error:', e);
+            }
+          }
+        } else if (ytPlayerReadyRef.current) {
+          try {
+            if (currentYtVideoIdRef.current !== ytId) {
+              currentYtVideoIdRef.current = ytId;
+              ytPlayerRef.current.loadVideoById({
+                videoId: ytId,
+                startSeconds: Math.floor(targetPos)
+              });
+            }
+
+            ytPlayerRef.current.setVolume(Math.max(0, Math.min(100, Math.round(musicVolume * 100))));
+
+            if (musicState.isPlaying) {
+              ytPlayerRef.current.playVideo();
+              const currentPos = ytPlayerRef.current.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : 0;
+              if (Math.abs(currentPos - targetPos) > 2.0) {
+                ytPlayerRef.current.seekTo(targetPos, true);
+              }
+            } else {
+              ytPlayerRef.current.pauseVideo();
+              if (Math.abs((ytPlayerRef.current.getCurrentTime?.() || 0) - (musicState.lastPosition || 0)) > 2.0) {
+                ytPlayerRef.current.seekTo(musicState.lastPosition || 0, true);
+              }
+            }
+          } catch (err) {
+            console.warn('[YouTube] Sync loop exception:', err);
+          }
+        }
+      };
+
+      initOrSyncYT();
+      const ytInterval = setInterval(initOrSyncYT, 2000);
+      return () => clearInterval(ytInterval);
+    }
+
+    // ───────────────────────────────────────────
+    // Path B: Synchronized Direct MP3 / Audio Stream
+    // ───────────────────────────────────────────
+    if (ytPlayerRef.current && ytPlayerReadyRef.current) {
+      try { ytPlayerRef.current.pauseVideo(); } catch (_) {}
+    }
+
+    if (!audio) return;
 
     if (audio.src !== trackUrl) {
       audio.src = trackUrl;
@@ -496,7 +623,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     syncAudio();
     const interval = setInterval(syncAudio, 2000);
     return () => clearInterval(interval);
-  }, [musicState, getServerTime]);
+  }, [musicState, getServerTime, musicVolume]);
 
   // Sync local video element
   useEffect(() => {
@@ -1189,6 +1316,71 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             </button>
           </div>
         </div>
+
+        {/* YouTube Video Player Overlay / Background Audio Element */}
+        <div
+          className={`absolute bottom-24 right-6 z-30 transition-all duration-300 rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-black ${
+            isYouTubeUrl(musicState.currentTrack?.url || '')
+              ? showYtVideo
+                ? 'w-72 sm:w-80 aspect-video block'
+                : 'w-1 h-1 opacity-0 pointer-events-none'
+              : 'hidden'
+          }`}
+        >
+          <div id="youtube-sync-player" className="w-full h-full" />
+          <button
+            onClick={() => setShowYtVideo(!showYtVideo)}
+            className="absolute top-2 right-2 bg-black/70 hover:bg-black/90 text-white/80 hover:text-white p-1 rounded-full text-xs z-40 backdrop-blur-sm border border-white/10"
+            title={showYtVideo ? "Hide Music Video" : "Show Music Video"}
+          >
+            {showYtVideo ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+        </div>
+
+        {/* Global Synchronized Music Pill (when song is playing) */}
+        {musicState.currentTrack && (
+          <div className="absolute top-4 right-6 z-30 bg-[#18181b]/90 border border-fuchsia-500/30 backdrop-blur-md px-3.5 py-2 rounded-2xl shadow-xl flex items-center gap-3 animate-fade-in max-w-xs sm:max-w-sm">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <span className="h-2 w-2 rounded-full bg-fuchsia-400 animate-pulse flex-shrink-0" />
+              <div className="flex flex-col min-w-0">
+                <span className="text-xs font-bold text-white truncate">
+                  {musicState.currentTrack.title}
+                </span>
+                <span className="text-[10px] text-fuchsia-300/70 truncate">
+                  {musicState.currentTrack.artist}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {isYouTubeUrl(musicState.currentTrack.url) && (
+                <button
+                  onClick={() => setShowYtVideo(!showYtVideo)}
+                  className={`p-1.5 rounded-lg text-xs transition-all border ${
+                    showYtVideo 
+                      ? 'bg-fuchsia-600/30 border-fuchsia-500/40 text-fuchsia-200' 
+                      : 'bg-white/5 border-white/10 text-white/60 hover:text-white'
+                  }`}
+                  title={showYtVideo ? "Hide YouTube Video" : "Show YouTube Video"}
+                >
+                  {showYtVideo ? <Eye size={13} /> : <EyeOff size={13} />}
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  if (musicState.isPlaying) {
+                    sendMusicAction('pause', musicState.currentTrackId, musicState.lastPosition, musicState.currentTrack);
+                  } else {
+                    sendMusicAction('play', musicState.currentTrackId, musicState.lastPosition, musicState.currentTrack);
+                  }
+                }}
+                className="bg-fuchsia-600 hover:bg-fuchsia-500 p-1.5 rounded-xl text-white transition-all active:scale-95 shadow-md shadow-fuchsia-950/40"
+              >
+                {musicState.isPlaying ? <Pause size={14} fill="white" /> : <Play size={14} fill="white" />}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Sidebars */}
         {activeSidebar === 'chat' && <ChatSidebar />}
