@@ -1672,66 +1672,87 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                   )}
                 </div>
 
-                {/* Center Stage Shared Scrubber & Control Footer */}
+                {/* Center Stage Footer: Shared Scrubber for YouTube/Direct Audio OR Stream Tab Audio banner for external web players */}
                 <div className="p-4 border-t border-white/10 bg-white/5 flex flex-col gap-3">
-                  {/* Timeline Bar */}
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-white/60 font-mono w-10 text-right">
-                      {Math.floor(songProgress.current / 60)}:{(Math.floor(songProgress.current % 60)).toString().padStart(2, '0')}
-                    </span>
-                    <input
-                      type="range"
-                      min={0}
-                      max={songProgress.duration || 300}
-                      value={songProgress.current}
-                      onMouseDown={() => { isSeekingRef.current = true; }}
-                      onTouchStart={() => { isSeekingRef.current = true; }}
-                      onChange={(e) => setSongProgress(prev => ({ ...prev, current: parseFloat(e.target.value) }))}
-                      onMouseUp={(e) => handleSeek(parseFloat((e.target as HTMLInputElement).value))}
-                      onTouchEnd={(e) => handleSeek(parseFloat((e.target as HTMLInputElement).value))}
-                      className="flex-1 accent-fuchsia-500 h-1.5 bg-white/20 rounded-lg cursor-pointer transition-all"
-                    />
-                    <span className="text-xs text-white/60 font-mono w-10">
-                      {Math.floor((songProgress.duration || 0) / 60)}:{(Math.floor((songProgress.duration || 0) % 60)).toString().padStart(2, '0')}
-                    </span>
-                  </div>
+                  {/* For YouTube & Direct Audio Streams: Live Room Synchronized Timeline Bar */}
+                  {(isYouTubeUrl(musicState.currentTrack.url) || (!extractSpotifyInfo(musicState.currentTrack.url) && !isMonochromeUrl(musicState.currentTrack.url))) ? (
+                    <>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-white/60 font-mono w-10 text-right">
+                          {Math.floor(songProgress.current / 60)}:{(Math.floor(songProgress.current % 60)).toString().padStart(2, '0')}
+                        </span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={songProgress.duration > 0 ? songProgress.duration : (musicState.currentTrack?.duration || 240)}
+                          value={songProgress.current}
+                          onMouseDown={() => { isSeekingRef.current = true; }}
+                          onTouchStart={() => { isSeekingRef.current = true; }}
+                          onChange={(e) => setSongProgress(prev => ({ ...prev, current: parseFloat(e.target.value) }))}
+                          onMouseUp={(e) => handleSeek(parseFloat((e.target as HTMLInputElement).value))}
+                          onTouchEnd={(e) => handleSeek(parseFloat((e.target as HTMLInputElement).value))}
+                          className="flex-1 accent-fuchsia-500 h-1.5 bg-white/20 rounded-lg cursor-pointer transition-all"
+                        />
+                        <span className="text-xs text-white/60 font-mono w-10">
+                          {Math.floor((songProgress.duration || musicState.currentTrack?.duration || 0) / 60)}:{(Math.floor((songProgress.duration || musicState.currentTrack?.duration || 0) % 60)).toString().padStart(2, '0')}
+                        </span>
+                      </div>
 
-                  {/* Control Buttons */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              let currentPos = musicState.lastPosition || 0;
+                              if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
+                                try { currentPos = ytPlayerRef.current.getCurrentTime(); } catch (_) {}
+                              } else if (musicAudioRef.current) {
+                                currentPos = musicAudioRef.current.currentTime;
+                              }
+
+                              if (musicState.isPlaying) {
+                                sendMusicAction('pause', musicState.currentTrackId, currentPos, musicState.currentTrack);
+                              } else {
+                                sendMusicAction('play', musicState.currentTrackId, currentPos, musicState.currentTrack);
+                              }
+                            }}
+                            className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold px-4 py-2 rounded-xl transition-all active:scale-95 shadow-md shadow-fuchsia-950/40 flex items-center gap-2 text-xs"
+                          >
+                            {musicState.isPlaying ? <Pause size={14} fill="white" /> : <Play size={14} fill="white" />}
+                            <span>{musicState.isPlaying ? 'Pause for Room' : 'Play for Room'}</span>
+                          </button>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            setActiveSidebar('music');
+                            setIsPlayerExpanded(false);
+                          }}
+                          className="text-xs text-fuchsia-300 hover:text-fuchsia-200 flex items-center gap-1.5 font-semibold bg-white/5 hover:bg-white/10 px-3 py-2 rounded-xl border border-white/10 transition-all"
+                        >
+                          <Music size={13} />
+                          <span>Browse Songs & Playlists</span>
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    /* For External Web Players (Monochrome / Spotify): 1-Click Stream Desktop Audio Banner */
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 py-1">
+                      <div className="flex items-center gap-2 text-xs text-white/80">
+                        <Sparkles size={16} className="text-emerald-400 flex-shrink-0" />
+                        <span>Use the player controls inside the window above to play, or stream lossless audio to your partner:</span>
+                      </div>
                       <button
                         onClick={() => {
-                          let currentPos = musicState.lastPosition || 0;
-                          if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
-                            try { currentPos = ytPlayerRef.current.getCurrentTime(); } catch (_) {}
-                          } else if (musicAudioRef.current) {
-                            currentPos = musicAudioRef.current.currentTime;
-                          }
-
-                          if (musicState.isPlaying) {
-                            sendMusicAction('pause', musicState.currentTrackId, currentPos, musicState.currentTrack);
-                          } else {
-                            sendMusicAction('play', musicState.currentTrackId, currentPos, musicState.currentTrack);
-                          }
+                          setIsPlayerExpanded(false);
+                          toggleScreenShare();
                         }}
-                        className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold px-4 py-2 rounded-xl transition-all active:scale-95 shadow-md shadow-fuchsia-950/40 flex items-center gap-2 text-xs"
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all active:scale-95 shadow-md shadow-emerald-950/40 flex items-center gap-2 flex-shrink-0"
                       >
-                        {musicState.isPlaying ? <Pause size={14} fill="white" /> : <Play size={14} fill="white" />}
-                        <span>{musicState.isPlaying ? 'Pause for Room' : 'Play for Room'}</span>
+                        <Monitor size={14} />
+                        <span>Stream Audio to Room</span>
                       </button>
                     </div>
-
-                    <button
-                      onClick={() => {
-                        setActiveSidebar('music');
-                        setIsPlayerExpanded(false);
-                      }}
-                      className="text-xs text-fuchsia-300 hover:text-fuchsia-200 flex items-center gap-1.5 font-semibold bg-white/5 hover:bg-white/10 px-3 py-2 rounded-xl border border-white/10 transition-all"
-                    >
-                      <Music size={13} />
-                      <span>Browse Songs & Playlists</span>
-                    </button>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
