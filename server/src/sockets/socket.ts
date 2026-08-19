@@ -63,8 +63,8 @@ export function setupSockets(io: Server) {
         }
 
         const isHost = Boolean(room?.hostId && room.hostId === userId);
-        const isDjAuthorized = isHost || (await db.isDjAuthorized(roomId, userId));
-        const djPasscode = isHost ? db.getDjPasscode(roomId) : undefined;
+        const djPasscode = isHost ? db.generateNewDjPasscode(roomId, userId) : undefined;
+        const isDjAuthorized = isHost;
 
         console.log(`[Room Join] User "${username}" (${userId}) joined room "${roomId}". isHost: ${isHost}, hostId: "${room?.hostId}", djPasscode: "${djPasscode}"`);
 
@@ -196,6 +196,40 @@ export function setupSockets(io: Server) {
         }
       } catch (error) {
         console.error('Error unlocking DJ access:', error);
+      }
+    });
+
+    // Handle Host regenerating new random DJ PIN
+    socket.on('room:regenerate-dj-pin', async (payload: { roomId: string }) => {
+      const { roomId } = payload;
+      const requesterId = currentUserId || (socket as any)?.data?.userId;
+      if (!roomId || !requesterId) return;
+
+      try {
+        const room = await db.getRoom(roomId);
+        if (room?.hostId === requesterId) {
+          const newPasscode = db.generateNewDjPasscode(roomId, requesterId);
+          console.log(`[PIN Regenerated] Host ${currentUsername} regenerated PIN for room ${roomId}: ${newPasscode}`);
+
+          // Emit new PIN to host
+          socket.emit('room:pin-regenerated', { djPasscode: newPasscode });
+
+          // Revoke non-hosts
+          socket.to(roomId).emit('room:dj-revoked', {
+            message: 'The room host has generated a new random DJ Passcode. Please enter the new PIN to control music.'
+          });
+
+          // Chat notification
+          io.to(roomId).emit('chat:message', {
+            id: `sys-${Date.now()}`,
+            userId: 'system',
+            username: 'System',
+            message: `🔄 The room host generated a new random DJ Passcode.`,
+            createdAt: new Date().toISOString()
+          });
+        }
+      } catch (error) {
+        console.error('Error regenerating DJ PIN:', error);
       }
     });
 

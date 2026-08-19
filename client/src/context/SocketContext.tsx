@@ -60,6 +60,7 @@ interface SocketContextType {
   djPasscode: string | null;
   isDjAuthorized: boolean;
   unlockDj: (passcode: string) => void;
+  regenerateDjPin: () => void;
   unlockError: string | null;
   unlockSuccess: string | null;
   clearUnlockError: () => void;
@@ -221,7 +222,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setHostId(payload.hostId);
     });
 
-    // DJ PIN Unlock responses
+    // DJ PIN Unlock & Revoke responses
     sock.on('room:dj-unlocked', (payload: { isDjAuthorized: boolean; message: string }) => {
       console.log(`[Socket] DJ access unlocked!`, payload);
       setIsDjAuthorizedState(true);
@@ -234,6 +235,20 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       console.warn(`[Socket] DJ unlock failed:`, payload.message);
       setUnlockError(payload.message || 'Incorrect 4-digit DJ PIN.');
       setUnlockSuccess(null);
+    });
+
+    sock.on('room:pin-regenerated', (payload: { djPasscode: string }) => {
+      console.log(`[Socket] New DJ PIN received:`, payload.djPasscode);
+      setDjPasscode(payload.djPasscode);
+      setUnlockSuccess('🔄 New random DJ Passcode generated!');
+      setTimeout(() => setUnlockSuccess(null), 4000);
+    });
+
+    sock.on('room:dj-revoked', (payload: { message: string }) => {
+      console.log(`[Socket] DJ access revoked - PIN changed`);
+      setIsDjAuthorizedState(false);
+      setPermissionError(payload.message || 'DJ PIN has changed.');
+      setTimeout(() => setPermissionError(null), 5000);
     });
 
     // Permission denied on music actions (if non-host tries to change track)
@@ -407,6 +422,15 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, []);
 
+  const regenerateDjPin = useCallback(() => {
+    const sock = socketRef.current;
+    if (sock && roomIdRef.current) {
+      sock.emit('room:regenerate-dj-pin', {
+        roomId: roomIdRef.current
+      });
+    }
+  }, []);
+
   // Expose socket as state (triggers re-renders in consumers on connect/disconnect)
   return (
     <SocketContext.Provider
@@ -429,6 +453,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         djPasscode,
         isDjAuthorized,
         unlockDj,
+        regenerateDjPin,
         unlockError,
         unlockSuccess,
         clearUnlockError,

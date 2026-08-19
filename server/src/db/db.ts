@@ -542,6 +542,13 @@ export const db = {
     return code;
   },
 
+  generateNewDjPasscode: (roomId: string, hostId?: string) => {
+    const code = Math.floor(1000 + Math.random() * 9000).toString();
+    mockDb.roomDjPasscodes.set(roomId, code);
+    mockDb.roomAuthorizedDjs.set(roomId, hostId ? new Set([hostId]) : new Set());
+    return code;
+  },
+
   isDjAuthorized: async (roomId: string, userId: string) => {
     const room = await db.getRoom(roomId);
     if (room?.hostId && room.hostId === userId) return true;

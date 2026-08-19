@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useSocket } from '../context/SocketContext';
 import { useAudioMixer } from '../context/AudioMixerContext';
-import { Play, Pause, Music, Upload, Loader2, Plus, Volume2, Link as LinkIcon, Radio, Share2, Disc, Zap, ExternalLink, Key, Copy, Check } from 'lucide-react';
+import { Play, Pause, Music, Upload, Loader2, Plus, Volume2, Link as LinkIcon, Radio, Share2, Disc, Zap, ExternalLink, Key, Copy, Check, RotateCw } from 'lucide-react';
 
 
 import { parseMediaUrl, extractYouTubeId, isYouTubeUrl, isSpotifyUrl, isMonochromeUrl, extractSpotifyInfo } from '../utils/mediaPlatform';
@@ -33,6 +33,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
     djPasscode,
     isDjAuthorized,
     unlockDj,
+    regenerateDjPin,
     unlockError,
     unlockSuccess,
     clearUnlockError,
@@ -516,25 +517,34 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
           </span>
         </div>
 
-        {/* If user is Host, show their 4-digit PIN with 1-click copy */}
+        {/* If user is Host, show their 4-digit PIN with 1-click copy & regenerate */}
         {isHost && djPasscode && (
           <div className="flex items-center justify-between bg-black/20 rounded-xl p-2 border border-amber-500/30">
             <div className="flex flex-col">
               <span className="text-[9px] uppercase tracking-wider text-amber-400 font-bold">Your Room DJ Passcode:</span>
               <span className="text-base font-mono font-black tracking-widest text-amber-300">{djPasscode}</span>
             </div>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(djPasscode);
-                setCopiedPin(true);
-                setTimeout(() => setCopiedPin(false), 2000);
-              }}
-              className="bg-amber-500 hover:bg-amber-400 text-black px-2.5 py-1 rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center gap-1 shadow-md shadow-amber-950/40"
-              title="Copy PIN to share with friends"
-            >
-              {copiedPin ? <Check size={12} /> : <Copy size={12} />}
-              <span>{copiedPin ? 'Copied!' : 'Copy PIN'}</span>
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(djPasscode);
+                  setCopiedPin(true);
+                  setTimeout(() => setCopiedPin(false), 2000);
+                }}
+                className="bg-amber-500 hover:bg-amber-400 text-black px-2.5 py-1 rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center gap-1 shadow-md shadow-amber-950/40"
+                title="Copy PIN to share with friends"
+              >
+                {copiedPin ? <Check size={12} /> : <Copy size={12} />}
+                <span>{copiedPin ? 'Copied!' : 'Copy'}</span>
+              </button>
+              <button
+                onClick={regenerateDjPin}
+                className="bg-white/10 hover:bg-white/20 text-amber-300 hover:text-white p-1 rounded-lg transition-all active:scale-95 border border-white/10"
+                title="Generate New Random PIN"
+              >
+                <RotateCw size={14} />
+              </button>
+            </div>
           </div>
         )}
 
