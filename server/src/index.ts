@@ -65,7 +65,12 @@ app.use('/api', apiRouter);
 
 // Basic health check route
 app.get('/health', (req: express.Request, res: express.Response) => {
-  res.json({ status: 'OK', env: process.env.NODE_ENV || 'development' });
+  res.json({
+    status: 'OK',
+    uptime: process.uptime(),
+    timestamp: Date.now(),
+    env: process.env.NODE_ENV || 'development'
+  });
 });
 
 // Configure Socket.io
@@ -89,4 +94,21 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`  ListenMusicVC Server running on port ${PORT}`);
   console.log(`  Client Origin: ${clientOrigin}`);
   console.log(`===============================================`);
+
+  // Render Free Tier Keep-Alive Heartbeat (pings /health every 10 mins to prevent sleep)
+  const externalUrl = process.env.RENDER_EXTERNAL_URL || process.env.SERVER_URL;
+  if (externalUrl) {
+    console.log(`[KeepAlive] Activated 24/7 heartbeat for: ${externalUrl}`);
+    setInterval(async () => {
+      try {
+        const pingUrl = `${externalUrl.replace(/\/+$/, '')}/health`;
+        const res = await fetch(pingUrl);
+        if (res.ok) {
+          console.log(`[KeepAlive] Heartbeat ping successful at ${new Date().toISOString()}`);
+        }
+      } catch (err) {
+        console.warn(`[KeepAlive] Heartbeat ping failed:`, err);
+      }
+    }, 10 * 60 * 1000); // 10 minutes
+  }
 });

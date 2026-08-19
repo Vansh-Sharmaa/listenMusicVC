@@ -18,10 +18,12 @@ interface MusicTrack {
 }
 
 interface PlaylistSidebarProps {
+  theme?: 'light' | 'dark';
   onStartScreenShare?: () => void;
 }
 
-export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenShare }) => {
+export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark', onStartScreenShare }) => {
+  const isLight = theme === 'light';
   const { musicState, sendMusicAction } = useSocket();
   const { registerRemoteScreenShareTrack } = useAudioMixer();
 
@@ -428,11 +430,11 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
   };
 
   return (
-    <div className="flex flex-col h-full bg-black/40 border-l border-white/10 backdrop-blur-md text-white w-80">
+    <div className={`flex flex-col h-full border-l backdrop-blur-md w-80 ${isLight ? 'bg-white/40 border-black/5 text-black' : 'bg-black/40 border-white/10 text-white'}`}>
       {/* Header */}
-      <div className="p-4 border-b border-white/10 flex justify-between items-center">
+      <div className={`p-4 border-b flex justify-between items-center ${isLight ? 'border-black/5' : 'border-white/10'}`}>
         <div className="flex items-center gap-2">
-          <Music size={20} className="text-fuchsia-400" />
+          <Music size={20} className={isLight ? "text-fuchsia-600" : "text-fuchsia-400"} />
           <h2 className="text-lg font-semibold tracking-wide">Shared Music Hub</h2>
         </div>
         <button
@@ -444,10 +446,9 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
         </button>
       </div>
 
-      {/* Instant Live Song Search & URL Bar */}
-      <div className="p-3 bg-gradient-to-b from-fuchsia-950/40 to-black/20 border-b border-white/10 relative">
+      <div className={`p-3 border-b relative ${isLight ? 'bg-gradient-to-b from-fuchsia-100/50 to-white/50 border-black/5' : 'bg-gradient-to-b from-fuchsia-950/40 to-black/20 border-white/10'}`}>
         <form onSubmit={handleQuickPlay} className="space-y-2">
-          <div className="flex items-center justify-between text-[11px] text-fuchsia-300 font-semibold px-0.5">
+          <div className={`flex items-center justify-between text-[11px] font-semibold px-0.5 ${isLight ? 'text-fuchsia-700' : 'text-fuchsia-300'}`}>
             <span>🔍 Search ANY Song in the World or Paste Link</span>
           </div>
           <div className="flex gap-1.5">
@@ -456,7 +457,11 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="e.g. Desi Kalakaar, Starboy, Arijit..."
-              className="flex-1 bg-white/10 border border-white/15 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder-white/40 focus:outline-none focus:border-fuchsia-500 transition-all"
+              className={`flex-1 border rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-fuchsia-500 transition-all ${
+                isLight 
+                  ? 'bg-black/5 border-black/10 text-black placeholder-black/40' 
+                  : 'bg-white/10 border-white/15 text-white placeholder-white/40'
+              }`}
             />
             <button
               type="submit"
@@ -471,8 +476,8 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
 
         {/* Live Search Results Dropdown */}
         {searchResults.length > 0 && (
-          <div className="absolute top-full left-0 right-0 z-50 bg-[#18181b]/95 border border-fuchsia-500/40 backdrop-blur-xl rounded-2xl shadow-2xl overflow-hidden max-h-72 overflow-y-auto mt-1 divide-y divide-white/10">
-            <div className="p-2 bg-white/5 text-[10px] uppercase tracking-wider font-bold text-fuchsia-300 flex items-center justify-between">
+          <div className={`absolute top-full left-0 right-0 z-50 backdrop-blur-xl rounded-2xl shadow-2xl overflow-hidden max-h-72 overflow-y-auto mt-1 divide-y border ${isLight ? 'bg-white/95 border-fuchsia-300/40 divide-black/10' : 'bg-[#18181b]/95 border-fuchsia-500/40 divide-white/10'}`}>
+            <div className={`p-2 text-[10px] uppercase tracking-wider font-bold flex items-center justify-between ${isLight ? 'bg-black/5 text-fuchsia-600' : 'bg-white/5 text-fuchsia-300'}`}>
               <span>Matching Songs</span>
               <span>Tap to Play for Room</span>
             </div>
@@ -495,8 +500,8 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
                   </div>
                 )}
                 <div className="flex flex-col min-w-0 flex-1">
-                  <span className="text-xs font-semibold text-white group-hover:text-fuchsia-200 truncate">{result.title}</span>
-                  <span className="text-[10px] text-white/50 truncate">{result.artist}</span>
+                  <span className={`text-xs font-semibold truncate ${isLight ? 'text-black group-hover:text-fuchsia-700' : 'text-white group-hover:text-fuchsia-200'}`}>{result.title}</span>
+                  <span className={`text-[10px] truncate ${isLight ? 'text-black/50' : 'text-white/50'}`}>{result.artist}</span>
                 </div>
                 <div className="p-1.5 rounded-full bg-fuchsia-600 text-white opacity-0 group-hover:opacity-100 transition-opacity">
                   <Play size={10} fill="white" />
@@ -508,18 +513,18 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
       </div>
 
       {/* Share Spotify / Laptop Audio Action Banner */}
-      <div className="p-2.5 bg-gradient-to-r from-fuchsia-950/20 to-emerald-950/20 border-b border-white/10">
+      <div className={`p-2.5 border-b ${isLight ? 'bg-gradient-to-r from-fuchsia-100 to-emerald-100 border-black/5' : 'bg-gradient-to-r from-fuchsia-950/20 to-emerald-950/20 border-white/10'}`}>
         <button
           onClick={handleShareSpotifyAudio}
-          className="w-full bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-2 flex items-center justify-center gap-2 text-xs font-semibold text-emerald-300 hover:text-emerald-200 transition-all active:scale-95"
+          className={`w-full rounded-xl p-2 flex items-center justify-center gap-2 text-xs font-semibold transition-all active:scale-95 border ${isLight ? 'bg-black/5 hover:bg-black/10 border-black/10 text-emerald-700 hover:text-emerald-800' : 'bg-white/5 hover:bg-white/10 border-white/10 text-emerald-300 hover:text-emerald-200'}`}
         >
-          <Share2 size={13} className="text-emerald-400" />
+          <Share2 size={13} className={isLight ? "text-emerald-600" : "text-emerald-400"} />
           <span>Stream Spotify / Desktop Audio</span>
         </button>
       </div>
 
       {/* Now Playing Card */}
-      <div className="p-4 bg-white/5 border-b border-white/10 shadow-inner">
+      <div className={`p-4 shadow-inner border-b ${isLight ? 'bg-black/5 border-black/5' : 'bg-white/5 border-white/10'}`}>
         {activeTrack ? (
           <div className="space-y-3">
             <span className="text-[10px] text-fuchsia-400 uppercase tracking-widest font-bold flex items-center gap-1">
@@ -540,7 +545,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
               )}
               <div className="flex flex-col min-w-0 flex-1">
                 <span className="font-semibold text-sm truncate">{activeTrack.title}</span>
-                <span className="text-xs text-white/50 truncate">{activeTrack.artist}</span>
+                <span className={`text-xs truncate ${isLight ? 'text-black/50' : 'text-white/50'}`}>{activeTrack.artist}</span>
               </div>
             </div>
             
@@ -555,15 +560,40 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
             </div>
           </div>
         ) : (
-          <div className="text-center text-xs text-white/40 py-3 italic flex flex-col items-center gap-1.5">
-            <Volume2 size={22} className="text-white/20 animate-pulse" />
+          <div className={`text-center text-xs py-3 italic flex flex-col items-center gap-1.5 ${isLight ? 'text-black/40' : 'text-white/40'}`}>
+            <Volume2 size={22} className={`animate-pulse ${isLight ? 'text-black/20' : 'text-white/20'}`} />
             No track playing. Click a song below or paste any YouTube link!
           </div>
         )}
       </div>
 
+      {/* Up Next / Queue */}
+      {musicState.queue && musicState.queue.length > 0 && (
+        <div className={`p-3 shadow-inner border-b ${isLight ? 'bg-black/5 border-black/5' : 'bg-white/5 border-white/10'}`}>
+          <span className="text-[10px] text-fuchsia-400 uppercase tracking-widest font-bold mb-2 flex items-center gap-1">
+            <Radio size={10} />
+            Up Next
+          </span>
+          <div className="space-y-2 max-h-24 overflow-y-auto scrollbar-none pr-1">
+            {musicState.queue.map((qTrack: any, idx: number) => (
+              <div key={`${qTrack.id}-${idx}`} className="flex items-center gap-2.5 text-xs group">
+                <span className={`font-mono text-[9px] w-3 ${isLight ? 'text-black/30' : 'text-white/30'}`}>{idx + 1}.</span>
+                {qTrack.thumbnail ? (
+                  <img src={qTrack.thumbnail} alt="thumb" className={`w-5 h-5 rounded object-cover flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity border ${isLight ? 'border-black/10' : 'border-white/10'}`} />
+                ) : (
+                  <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${isLight ? 'bg-black/10' : 'bg-white/10'}`}>
+                    <Music size={10} className={isLight ? "text-black/50" : "text-white/50"} />
+                  </div>
+                )}
+                <span className={`truncate transition-colors flex-1 ${isLight ? 'text-black/70 group-hover:text-black' : 'text-white/70 group-hover:text-white'}`}>{qTrack.title}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Category Tabs: All, YouTube, Spotify, Monochrome, Lofi */}
-      <div className="px-3 pt-2.5 pb-1 flex gap-1 overflow-x-auto border-b border-white/5 scrollbar-none">
+      <div className={`px-3 pt-2.5 pb-1 flex gap-1 overflow-x-auto border-b scrollbar-none ${isLight ? 'border-black/5' : 'border-white/5'}`}>
         {[
           { id: 'all', label: 'All' },
           { id: 'youtube', label: '🔴 YouTube' },
@@ -577,7 +607,9 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
             className={`text-[10px] font-bold px-2.5 py-1 rounded-lg whitespace-nowrap transition-all ${
               selectedCategory === cat.id
                 ? 'bg-fuchsia-600 text-white shadow-sm'
-                : 'bg-white/5 hover:bg-white/10 text-white/50 hover:text-white'
+                : isLight
+                  ? 'bg-black/5 hover:bg-black/10 text-black/50 hover:text-black'
+                  : 'bg-white/5 hover:bg-white/10 text-white/50 hover:text-white'
             }`}
           >
             {cat.label}
@@ -588,7 +620,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
       {/* Online Streams & Tracks List */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {loading ? (
-          <div className="flex items-center justify-center py-10 text-white/30 text-xs">
+          <div className={`flex items-center justify-center py-10 text-xs ${isLight ? 'text-black/30' : 'text-white/30'}`}>
             <Loader2 size={16} className="animate-spin mr-2" />
             Loading music...
           </div>
@@ -613,38 +645,53 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
                 : { label: 'LOSSLESS', color: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30' };
 
             return (
-              <button
+              <div
                 key={track.id}
-                onClick={() => handleTrackSelect(track)}
                 className={`w-full text-left p-2.5 rounded-xl flex items-center gap-3 group transition-all duration-300 ${
                   isCurrent
-                    ? 'bg-fuchsia-600/25 border border-fuchsia-500/40 text-white shadow-lg'
-                    : 'hover:bg-white/5 border border-transparent text-white/70 hover:text-white'
+                    ? isLight
+                      ? 'bg-fuchsia-600/15 border border-fuchsia-500/30 text-black shadow-lg'
+                      : 'bg-fuchsia-600/25 border border-fuchsia-500/40 text-white shadow-lg'
+                    : isLight
+                      ? 'bg-transparent hover:bg-black/5 border border-transparent hover:border-black/10'
+                      : 'bg-transparent hover:bg-white/5 border border-transparent hover:border-white/10'
                 }`}
               >
-                {track.thumbnail ? (
-                  <img
-                    src={track.thumbnail}
-                    alt={track.title}
-                    className="w-10 h-10 rounded-lg object-cover border border-white/10 flex-shrink-0"
-                  />
-                ) : (
-                  <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center flex-shrink-0 text-white/40 group-hover:text-fuchsia-300">
-                    <Music size={16} />
+                <button onClick={() => handleTrackSelect(track)} className="flex-1 flex items-center gap-3 min-w-0 text-left">
+                  {track.thumbnail ? (
+                    <img
+                      src={track.thumbnail}
+                      alt={track.title}
+                      className={`w-10 h-10 rounded-lg object-cover flex-shrink-0 border ${isLight ? 'border-black/10' : 'border-white/10'}`}
+                    />
+                  ) : (
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 border ${isLight ? 'bg-black/5 border-black/10 text-black/40 group-hover:text-fuchsia-600' : 'bg-white/5 border-white/10 text-white/40 group-hover:text-fuchsia-300'}`}>
+                      <Music size={16} />
+                    </div>
+                  )}
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <span className={`text-xs font-semibold truncate ${isCurrent ? (isLight ? 'text-fuchsia-700 font-bold' : 'text-fuchsia-200 font-bold') : (isLight ? 'text-black' : 'text-white')}`}>
+                      {track.title}
+                    </span>
+                    <span className={`text-[11px] truncate ${isLight ? 'text-black/50 group-hover:text-black/80' : 'text-white/40 group-hover:text-white/60'}`}>
+                      {track.artist}
+                    </span>
                   </div>
-                )}
-                <div className="flex flex-col min-w-0 flex-1">
-                  <span className={`text-xs font-semibold truncate ${isCurrent ? 'text-fuchsia-200 font-bold' : ''}`}>
-                    {track.title}
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase font-bold border ${badge.color}`}>
+                    {badge.label}
                   </span>
-                  <span className="text-[11px] text-white/40 group-hover:text-white/60 truncate">
-                    {track.artist}
-                  </span>
-                </div>
-                <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase font-bold border ${badge.color}`}>
-                  {badge.label}
-                </span>
-              </button>
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    sendMusicAction('queue-add', track.id, 0, track);
+                  }}
+                  className={`p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity active:scale-95 ${isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white'}`}
+                  title="Add to Queue"
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
             );
           })
         )}

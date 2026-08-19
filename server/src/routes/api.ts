@@ -256,6 +256,31 @@ apiRouter.get('/music/search', async (req: Request, res: Response) => {
       }
     }
 
+    // Tertiary Fallback: iTunes Search API (100% reliable on Datacenter IPs / Render with instant HQ previews)
+    if (results.length === 0) {
+      try {
+        const itunesRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=10`);
+        if (itunesRes.ok) {
+          const itunesData = await itunesRes.json();
+          if (itunesData.results && Array.isArray(itunesData.results)) {
+            for (const item of itunesData.results) {
+              results.push({
+                id: `itunes-${item.trackId}`,
+                title: item.trackName || 'Song',
+                artist: item.artistName || 'Artist',
+                url: item.previewUrl || `https://www.youtube.com/results?search_query=${encodeURIComponent(item.artistName + ' ' + item.trackName)}`,
+                duration: Math.round((item.trackTimeMillis || 180000) / 1000),
+                thumbnail: (item.artworkUrl100 || '').replace('100x100bb', '600x600bb'),
+                isRoyaltyFree: true
+              });
+            }
+          }
+        }
+      } catch (itunesErr) {
+        console.warn('[Music Search] iTunes fallback failed:', itunesErr);
+      }
+    }
+
     return res.json(results);
   } catch (err) {
     console.error('[Music Search] Exception:', err);

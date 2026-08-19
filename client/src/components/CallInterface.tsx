@@ -34,7 +34,9 @@ import {
   Sparkles,
   Disc,
   SkipForward,
-  SkipBack
+  SkipBack,
+  Sun,
+  Moon
 } from 'lucide-react';
 
 interface CallInterfaceProps {
@@ -127,8 +129,25 @@ const ICE_SERVERS: RTCConfiguration = {
     { urls: 'stun:stun4.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
     { urls: 'stun:stun.services.mozilla.com' },
-    { urls: 'stun:global.stun.twilio.com:3478' }
-  ]
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    { urls: 'stun:openrelay.metered.ca:80' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
+  ],
+  iceCandidatePoolSize: 10
 };
 
 export const CallInterface: React.FC<CallInterfaceProps> = ({
@@ -155,6 +174,8 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [remotePeers, setRemotePeers] = useState<Map<string, PeerStream>>(new Map());
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const isLight = theme === 'light';
 
   // Toolbar controls
   const [micOn, setMicOn] = useState(true);
@@ -695,6 +716,16 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                     isLocalTriggeredRef.current = true;
                     sendMusicAction('pause', musicState.currentTrackId, curTime, musicState.currentTrack);
                     setTimeout(() => { isLocalTriggeredRef.current = false; }, 800);
+                  } else if (event.data === 0) { // ENDED
+                    if (musicState.queue && musicState.queue.length > 0) {
+                      isLocalTriggeredRef.current = true;
+                      sendMusicAction('queue-pop');
+                      setTimeout(() => { isLocalTriggeredRef.current = false; }, 800);
+                    } else {
+                      isLocalTriggeredRef.current = true;
+                      sendMusicAction('pause', musicState.currentTrackId, 0, musicState.currentTrack);
+                      setTimeout(() => { isLocalTriggeredRef.current = false; }, 800);
+                    }
                   }
                 },
                 onError: async (err: any) => {
@@ -796,6 +827,18 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       audio.src = trackUrl;
       audio.load();
     }
+
+    audio.onended = () => {
+      if (musicState.queue && musicState.queue.length > 0) {
+        isLocalTriggeredRef.current = true;
+        sendMusicAction('queue-pop');
+        setTimeout(() => { isLocalTriggeredRef.current = false; }, 800);
+      } else {
+        isLocalTriggeredRef.current = true;
+        sendMusicAction('pause', musicState.currentTrackId, 0, musicState.currentTrack);
+        setTimeout(() => { isLocalTriggeredRef.current = false; }, 800);
+      }
+    };
 
     const syncAudio = async () => {
       if (isSyncingMusicRef.current || !audio.src) return;
@@ -1423,12 +1466,25 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-[#09090b] overflow-hidden text-white font-sans select-none">
+    <div className={`flex flex-col h-[100dvh] overflow-hidden font-sans select-none relative ${isLight ? 'bg-white text-black' : 'bg-black text-white'}`}>
+      {/* Dynamic Ambient Blur Background */}
+      {musicState.currentTrack?.thumbnail && (
+        <div 
+          className={`absolute inset-0 z-0 bg-cover bg-center transition-all duration-[2000ms] ease-in-out ${isLight ? 'opacity-80' : 'opacity-60'}`}
+          style={{ 
+            backgroundImage: `url(${musicState.currentTrack.thumbnail})`,
+            filter: isLight ? 'blur(100px) saturate(150%) brightness(1.2)' : 'blur(100px) saturate(120%) brightness(0.6)',
+            transform: 'scale(1.1)'
+          }} 
+        />
+      )}
+      <div className={`absolute inset-0 z-0 pointer-events-none ${isLight ? 'bg-white/40' : 'bg-gradient-to-b from-black/40 to-black/80'}`} />
+
       {/* Top Navigation Bar */}
-      <div className="h-12 md:h-14 bg-black/50 border-b border-white/10 backdrop-blur-md px-3 md:px-6 flex justify-between items-center z-20 flex-shrink-0">
+      <div className={`h-12 md:h-14 border-b backdrop-blur-xl px-3 md:px-6 flex justify-between items-center z-20 flex-shrink-0 relative ${isLight ? 'bg-white/40 border-black/5' : 'bg-black/20 border-white/5'}`}>
         <div className="flex items-center gap-2 md:gap-3">
-          <span className="font-semibold text-xs md:text-sm tracking-wide bg-gradient-to-r from-emerald-400 to-fuchsia-400 bg-clip-text text-transparent font-mono">
-            Room: {roomId}
+          <span className={`font-medium text-xs md:text-sm tracking-wide font-sans ${isLight ? 'text-black/90' : 'text-white/90'}`}>
+            Room {roomId}
           </span>
           <button
             onClick={() => {
@@ -1436,30 +1492,40 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
               navigator.clipboard.writeText(url);
               alert(`Room Link Copied!\n\nShare this with your partner:\n${url}`);
             }}
-            className="bg-white/10 hover:bg-white/20 text-white/80 hover:text-white px-2 py-1 rounded-lg text-[10px] md:text-xs flex items-center gap-1 border border-white/10 transition-all active:scale-95"
+            className={`px-2.5 py-1 rounded-md text-[10px] md:text-xs flex items-center gap-1.5 transition-all active:scale-95 ${isLight ? 'bg-black/5 hover:bg-black/10 text-black/70 hover:text-black' : 'bg-white/5 hover:bg-white/10 text-white/70 hover:text-white'}`}
           >
             <Copy size={11} />
             <span>Copy</span>
           </button>
           
           {isConnected ? (
-            <span className="text-[9px] md:text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20 font-semibold uppercase flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className={`text-[9px] md:text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1.5 font-medium ${isLight ? 'text-black/60' : 'text-white/60'}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${isLight ? 'bg-emerald-500' : 'bg-emerald-400'}`} />
               Live
             </span>
           ) : (
-            <span className="text-[9px] md:text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30 font-semibold flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-ping" />
+            <span className={`text-[9px] md:text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1.5 font-medium ${isLight ? 'text-black/60' : 'text-white/60'}`}>
+              <span className={`h-1.5 w-1.5 rounded-full animate-pulse ${isLight ? 'bg-amber-500' : 'bg-amber-400'}`} />
               Connecting...
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 text-[11px] md:text-xs text-white/70 bg-white/5 px-2.5 py-0.5 md:py-1 rounded-full border border-white/10">
-          <Users size={13} className={totalParticipants > 1 ? "text-emerald-400" : "text-zinc-400"} />
-          <span className={totalParticipants > 1 ? "text-white font-semibold" : "text-white/60"}>
-            {totalParticipants}
-          </span>
+        <div className="flex items-center gap-2 md:gap-4">
+          <button
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            className={`p-1.5 rounded-full transition-all active:scale-90 ${isLight ? 'bg-black/5 hover:bg-black/10 text-black/70 hover:text-black' : 'bg-white/5 hover:bg-white/10 text-white/70 hover:text-white'}`}
+            title="Toggle Theme"
+          >
+            {isLight ? <Moon size={16} /> : <Sun size={16} />}
+          </button>
+
+          <div className={`flex items-center gap-1.5 text-[11px] md:text-xs px-2.5 py-0.5 md:py-1 rounded-full border ${isLight ? 'bg-black/5 border-black/10 text-black/70' : 'bg-white/5 border-white/10 text-white/70'}`}>
+            <Users size={13} className={totalParticipants > 1 ? (isLight ? "text-emerald-600" : "text-emerald-400") : (isLight ? "text-zinc-500" : "text-zinc-400")} />
+            <span className={totalParticipants > 1 ? (isLight ? "text-black font-semibold" : "text-white font-semibold") : (isLight ? "text-black/60" : "text-white/60")}>
+              {totalParticipants}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1470,7 +1536,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 flex overflow-hidden relative z-10">
         {/* Permanent hidden music audio element */}
         <audio ref={musicAudioRef} playsInline preload="auto" className="hidden" />
 
@@ -1491,14 +1557,14 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
           </button>
         )}
 
-        <div className="flex-1 flex flex-col relative justify-between bg-black/20 p-2 md:p-6 overflow-hidden">
+        <div className="flex-1 flex flex-col relative justify-between bg-transparent p-2 md:p-6 overflow-hidden">
           <ReactionOverlay />
 
           {/* Video Grid (Optimized for iPhone / Mobile vertical stack & Desktop horizontal grid) */}
           <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4 w-full max-w-5xl mx-auto items-center justify-center p-1 md:p-2 overflow-y-auto min-h-0">
 
             {/* Local Video */}
-            <div className="bg-[#18181b] w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-2xl md:rounded-3xl overflow-hidden border border-white/10 relative shadow-2xl flex items-center justify-center">
+            <div className={`backdrop-blur-3xl w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-[32px] overflow-hidden border relative shadow-lg flex items-center justify-center transition-all duration-500 ${isLight ? 'bg-white/30 border-white/40' : 'bg-white/5 border-white/5'}`}>
               <video
                 ref={localVideoRef}
                 autoPlay
@@ -1514,7 +1580,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                   <span className="text-[11px] text-white/40">{username} (Camera Off)</span>
                 </div>
               )}
-              <span className="absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold bg-black/60 px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border border-white/10 backdrop-blur-sm flex items-center gap-1.5">
+              <span className={`absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 ${isLight ? 'bg-white/80 text-black border-black/10' : 'bg-black/60 text-white border-white/10'}`}>
                 <span className={`h-2 w-2 rounded-full ${micOn ? 'bg-emerald-500' : 'bg-red-500'}`} />
                 {username} (You)
               </span>
@@ -1522,14 +1588,14 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
             {/* Screen Share Tile */}
             {isScreenSharing && (
-              <div className="bg-[#18181b] w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-2xl md:rounded-3xl overflow-hidden border border-emerald-500/30 relative shadow-2xl flex items-center justify-center">
+              <div className={`backdrop-blur-3xl w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-[32px] overflow-hidden border relative shadow-lg flex items-center justify-center transition-all duration-500 ${isLight ? 'bg-emerald-50/50 border-emerald-500/30' : 'bg-white/5 border-emerald-500/20'}`}>
                 <video
                   ref={(el) => { if (el && screenStream) el.srcObject = screenStream; }}
                   autoPlay
                   playsInline
                   className="w-full h-full object-contain"
                 />
-                <span className="absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold bg-emerald-950/80 text-emerald-300 px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border border-emerald-500/30 backdrop-blur-sm flex items-center gap-1.5">
+                <span className={`absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 ${isLight ? 'bg-emerald-100/90 text-emerald-800 border-emerald-500/30' : 'bg-emerald-950/80 text-emerald-300 border-emerald-500/30'}`}>
                   <Tv size={12} /> Your Screen Share
                 </span>
               </div>
@@ -1540,9 +1606,9 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
               const videoTracks = peer.stream.getVideoTracks();
               if (videoTracks.length <= 1) {
                 return [
-                  <div key={peer.socketId} className="bg-[#18181b] w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-2xl md:rounded-3xl overflow-hidden border border-white/10 relative shadow-2xl flex items-center justify-center">
+                  <div key={peer.socketId} className={`backdrop-blur-3xl w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-[32px] overflow-hidden border relative shadow-lg flex items-center justify-center transition-all duration-500 ${isLight ? 'bg-white/30 border-white/40' : 'bg-white/5 border-white/5'}`}>
                     <RemoteVideoPlayer stream={peer.stream} username={peer.username} />
-                    <span className="absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold bg-black/60 px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border border-white/10 backdrop-blur-sm flex items-center gap-1.5 z-10">
+                    <span className={`absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 z-10 ${isLight ? 'bg-white/80 text-black border-black/10' : 'bg-black/60 text-white border-white/10'}`}>
                       <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                       {peer.username}
                     </span>
@@ -1553,9 +1619,9 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                 const singleStream = new MediaStream([track, ...peer.stream.getAudioTracks()]);
                 const isScreen = idx > 0;
                 return (
-                  <div key={`${peer.socketId}_${track.id}`} className={`bg-[#18181b] w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-2xl md:rounded-3xl overflow-hidden ${isScreen ? 'border border-emerald-500/30' : 'border border-white/10'} relative shadow-2xl flex items-center justify-center`}>
+                  <div key={`${peer.socketId}_${track.id}`} className={`backdrop-blur-3xl w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-[32px] overflow-hidden relative shadow-lg flex items-center justify-center transition-all duration-500 ${isScreen ? (isLight ? 'bg-emerald-50/50 border border-emerald-500/30' : 'bg-white/5 border border-emerald-500/20') : (isLight ? 'bg-white/30 border border-white/40' : 'bg-white/5 border border-white/5')}`}>
                     <RemoteVideoPlayer stream={singleStream} username={peer.username} />
-                    <span className={`absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold ${isScreen ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/30' : 'bg-black/60 text-white border-white/10'} px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 z-10`}>
+                    <span className={`absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 z-10 ${isScreen ? (isLight ? 'bg-emerald-100/90 text-emerald-800 border-emerald-500/30' : 'bg-emerald-950/80 text-emerald-300 border-emerald-500/30') : (isLight ? 'bg-white/80 text-black border-black/10' : 'bg-black/60 text-white border-white/10')}`}>
                       {isScreen ? <Tv size={12} /> : <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />}
                       {peer.username} {isScreen ? "'s Screen" : ''}
                     </span>
@@ -1566,7 +1632,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
             {/* Waiting placeholder (only when no remote peers) */}
             {remotePeerList.length === 0 && (
-              <div className="bg-[#18181b] w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-2xl md:rounded-3xl overflow-hidden border border-white/10 relative shadow-2xl flex items-center justify-center">
+              <div className={`backdrop-blur-3xl w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-[32px] overflow-hidden border relative shadow-lg flex items-center justify-center transition-all duration-500 ${isLight ? 'bg-white/30 border-white/40' : 'bg-white/5 border-white/5'}`}>
                 <div className="text-center space-y-2 md:space-y-3">
                   <div className={`h-12 w-12 md:h-16 md:w-16 rounded-full flex items-center justify-center mx-auto border transition-all duration-300 ${
                     mockSpeakingUser === 'Partner'
@@ -1603,7 +1669,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
           {/* Permanent YouTube Synchronized Player Container (Always Mounted in DOM) */}
           <div
-            className={`transition-all duration-300 rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-black ${
+            className={`transition-all duration-300 rounded-[32px] overflow-hidden shadow-2xl border border-white/10 bg-black/20 backdrop-blur-3xl ${
               musicState.currentTrack && isYouTubeUrl(musicState.currentTrack.url)
                 ? isPlayerExpanded
                   ? 'fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[90vw] max-w-4xl aspect-video block shadow-[0_0_60px_rgba(0,0,0,0.95)]'
@@ -1699,8 +1765,8 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
           {/* Full Center-Stage Theater View for Monochrome, Spotify & YouTube */}
           {isPlayerExpanded && musicState.currentTrack && (
-            <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-3 sm:p-6 animate-fade-in">
-              <div className="bg-[#121214] border border-white/15 rounded-3xl w-full max-w-5xl h-[88vh] max-h-[800px] shadow-2xl flex flex-col overflow-hidden relative">
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-3xl flex items-center justify-center p-3 sm:p-6 animate-fade-in">
+              <div className="bg-black/30 border border-white/10 rounded-[32px] w-full max-w-5xl h-[88vh] max-h-[800px] shadow-[0_8px_32px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden relative backdrop-blur-3xl">
                 {/* Center Stage Header */}
                 <div className="p-4 border-b border-white/10 bg-white/5 flex items-center justify-between">
                   <div className="flex items-center gap-3 min-w-0">
@@ -1911,15 +1977,15 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
           {/* Global Synchronized Music Pill & Interactive Shared Seek Bar (when song is selected) */}
           {musicState.currentTrack && (
-            <div className="absolute top-2 right-2 md:top-4 md:right-6 z-30 bg-[#18181b]/95 border border-fuchsia-500/30 backdrop-blur-md px-3 py-2 rounded-2xl shadow-2xl flex flex-col gap-1.5 animate-fade-in w-64 sm:w-80 md:w-96">
+            <div className={`absolute top-2 right-2 md:top-4 md:right-6 z-30 border backdrop-blur-3xl px-4 py-3 rounded-[32px] shadow-[0_8px_32px_rgba(0,0,0,0.4)] flex flex-col gap-2 animate-fade-in w-64 sm:w-80 md:w-96 transition-all duration-500 ${isLight ? 'bg-white/80 border-white/40' : 'bg-black/30 border-white/10'}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <span className="h-2 w-2 rounded-full bg-fuchsia-400 animate-pulse flex-shrink-0" />
+                  <span className={`h-2 w-2 rounded-full animate-pulse flex-shrink-0 ${isLight ? 'bg-fuchsia-500' : 'bg-fuchsia-400'}`} />
                   <div className="flex flex-col min-w-0">
-                    <span className="text-xs md:text-sm font-bold text-white truncate">
+                    <span className={`text-xs md:text-sm font-bold truncate ${isLight ? 'text-black' : 'text-white'}`}>
                       {musicState.currentTrack.title}
                     </span>
-                    <span className="text-[10px] text-fuchsia-300/70 truncate">
+                    <span className={`text-[10px] truncate ${isLight ? 'text-fuchsia-800' : 'text-fuchsia-300/70'}`}>
                       {musicState.currentTrack.artist}
                     </span>
                   </div>
@@ -2006,29 +2072,29 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
           {/* Bottom Toolbar (iPhone & Mobile optimized with safe areas) */}
           <div className="h-16 md:h-20 flex justify-center items-center gap-1.5 md:gap-3.5 z-20 flex-shrink-0 select-none pb-2 md:pb-0">
-            <button onClick={toggleMic} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${micOn ? 'bg-white/10 hover:bg-white/15 border-white/10 text-white' : 'bg-red-500/20 hover:bg-red-500/30 border-red-500/30 text-red-400'}`}>
+            <button onClick={toggleMic} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${micOn ? (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/15 hover:bg-white/25 text-white') : (isLight ? 'bg-red-100 text-red-600' : 'bg-white/5 hover:bg-white/10 text-white/40')}`}>
               {micOn ? <Mic size={18} /> : <MicOff size={18} />}
             </button>
-            <button onClick={toggleCam} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${camOn ? 'bg-white/10 hover:bg-white/15 border-white/10 text-white' : 'bg-red-500/20 hover:bg-red-500/30 border-red-500/30 text-red-400'}`}>
+            <button onClick={toggleCam} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${camOn ? (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/15 hover:bg-white/25 text-white') : (isLight ? 'bg-red-100 text-red-600' : 'bg-white/5 hover:bg-white/10 text-white/40')}`}>
               {camOn ? <Video size={18} /> : <VideoOff size={18} />}
             </button>
-            <button onClick={toggleScreenShare} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${isScreenSharing ? 'bg-emerald-600/20 border-emerald-500/30 text-emerald-400' : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'}`}>
+            <button onClick={toggleScreenShare} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${isScreenSharing ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`}>
               <Monitor size={18} />
             </button>
-            <button onClick={() => setShowReactionMenu(!showReactionMenu)} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${showReactionMenu ? 'bg-fuchsia-600/20 border-fuchsia-500/30 text-fuchsia-400' : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'}`}>
+            <button onClick={() => setShowReactionMenu(!showReactionMenu)} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${showReactionMenu ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`}>
               <Smile size={18} />
             </button>
-            <span className="w-[1px] h-5 bg-white/10 mx-0.5 md:mx-1" />
-            <button onClick={() => setActiveSidebar(activeSidebar === 'mixer' ? null : 'mixer')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${activeSidebar === 'mixer' ? 'bg-blue-600/20 border-blue-500/30 text-blue-400' : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'}`}>
+            <span className={`w-[1px] h-5 mx-0.5 md:mx-1 ${isLight ? 'bg-black/10' : 'bg-white/10'}`} />
+            <button onClick={() => setActiveSidebar(activeSidebar === 'mixer' ? null : 'mixer')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'mixer' ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`}>
               <Sliders size={18} />
             </button>
-            <button onClick={() => setActiveSidebar(activeSidebar === 'music' ? null : 'music')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${activeSidebar === 'music' ? 'bg-fuchsia-600/20 border-fuchsia-500/30 text-fuchsia-400' : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'}`}>
+            <button onClick={() => setActiveSidebar(activeSidebar === 'music' ? null : 'music')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'music' ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`}>
               <Music size={18} />
             </button>
-            <button onClick={() => setActiveSidebar(activeSidebar === 'chat' ? null : 'chat')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 border flex items-center justify-center active:scale-90 ${activeSidebar === 'chat' ? 'bg-emerald-600/20 border-emerald-500/30 text-emerald-400' : 'bg-white/10 hover:bg-white/15 border-white/10 text-white'}`}>
+            <button onClick={() => setActiveSidebar(activeSidebar === 'chat' ? null : 'chat')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'chat' ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`}>
               <MessageSquare size={18} />
             </button>
-            <button onClick={handleLeaveCall} className="p-2.5 md:p-3.5 rounded-2xl bg-red-600 hover:bg-red-500 text-white transition-all active:scale-90 duration-300 shadow-lg shadow-red-950/40">
+            <button onClick={handleLeaveCall} className="p-2.5 md:p-3.5 rounded-2xl bg-red-500 hover:bg-red-400 text-white transition-all active:scale-90 duration-300">
               <PhoneOff size={18} />
             </button>
           </div>
@@ -2036,18 +2102,18 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
         {/* Sidebars (Mobile modal bottom-sheet / overlay on iPhone, side-docked on desktop) */}
         {activeSidebar && (
-          <div className={`${isMobile ? 'fixed inset-x-0 bottom-0 top-12 z-50 bg-[#09090b]/98' : 'relative h-full flex-shrink-0'}`}>
+          <div className={`${isMobile ? `fixed inset-x-0 bottom-0 top-12 z-50 backdrop-blur-3xl ${isLight ? 'bg-white/60' : 'bg-black/60'}` : `relative h-full flex-shrink-0 border-l backdrop-blur-3xl rounded-[32px] overflow-hidden ml-2 ${isLight ? 'bg-white/30 border-black/5' : 'bg-black/20 border-white/5'}`}`}>
             <div className="relative h-full w-full">
               {isMobile && (
                 <button
                   onClick={() => setActiveSidebar(null)}
-                  className="absolute top-3 right-3 z-50 bg-white/10 hover:bg-white/20 text-white text-xs px-2.5 py-1 rounded-full border border-white/20"
+                  className={`absolute top-3 right-3 z-50 text-xs px-2.5 py-1 rounded-full border ${isLight ? 'bg-black/5 hover:bg-black/10 text-black border-black/10' : 'bg-white/10 hover:bg-white/20 text-white border-white/20'}`}
                 >
                   ✕ Close
                 </button>
               )}
               {activeSidebar === 'chat' && <ChatSidebar />}
-              {activeSidebar === 'music' && <PlaylistSidebar onStartScreenShare={toggleScreenShare} />}
+              {activeSidebar === 'music' && <PlaylistSidebar theme={theme} onStartScreenShare={toggleScreenShare} />}
               {activeSidebar === 'mixer' && <AudioMixerPanel />}
             </div>
           </div>

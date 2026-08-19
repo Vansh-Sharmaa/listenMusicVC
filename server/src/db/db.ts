@@ -9,6 +9,7 @@ class MockDatabase {
   messages = new Map<string, any[]>();
   tracks = new Map<string, any>();
   roomMusicStates = new Map<string, any>();
+  roomQueues = new Map<string, any[]>();
 
   constructor() {
     // Seed some royalty-free music tracks
@@ -93,7 +94,8 @@ class MockDatabase {
       updatedAt: new Date(),
     };
     this.roomMusicStates.set(room.id, musicState);
-    return { ...room, musicState };
+    this.roomQueues.set(room.id, []);
+    return { ...room, musicState: { ...musicState, queue: [] } };
   }
 
   async getRoom(id: string) {
@@ -197,6 +199,7 @@ class MockDatabase {
     if (!state) return null;
     return {
       ...state,
+      queue: this.roomQueues.get(roomId) || [],
       currentTrack: state.currentTrackId ? this.tracks.get(state.currentTrackId) : null
     };
   }
@@ -207,6 +210,7 @@ class MockDatabase {
     lastPosition?: number;
     trackData?: any;
     updatedBy?: string;
+    queue?: any[];
   }) {
     const state = this.roomMusicStates.get(roomId) || {
       id: randomUUID(),
@@ -248,12 +252,17 @@ class MockDatabase {
       state.updatedBy = data.updatedBy;
     }
 
+    if (data.queue !== undefined) {
+      this.roomQueues.set(roomId, data.queue);
+    }
+
     state.stateVersion = (state.stateVersion || 0) + 1;
     state.updatedAt = Date.now();
 
     this.roomMusicStates.set(roomId, state);
     return {
       ...state,
+      queue: this.roomQueues.get(roomId) || [],
       currentTrack: state.currentTrack || (state.currentTrackId ? this.tracks.get(state.currentTrackId) : null)
     };
   }
@@ -398,10 +407,15 @@ export const db = {
 
   getRoomMusicState: async (roomId: string) => {
     if (useMock || !prisma) return mockDb.getRoomMusicState(roomId);
-    return prisma.roomMusicState.findUnique({
+    const dbState = await prisma.roomMusicState.findUnique({
       where: { roomId },
       include: { currentTrack: true }
     });
+    if (!dbState) return null;
+    return {
+      ...dbState,
+      queue: mockDb.roomQueues.get(roomId) || []
+    };
   },
 
   updateRoomMusicState: async (roomId: string, data: {
@@ -410,6 +424,7 @@ export const db = {
     lastPosition?: number;
     trackData?: any;
     updatedBy?: string;
+    queue?: any[];
   }) => {
     if (useMock || !prisma) return mockDb.updateRoomMusicState(roomId, data);
     
@@ -421,12 +436,20 @@ export const db = {
       updateData.lastPositionUpdatedAt = new Date();
     }
 
+    if (data.queue !== undefined) {
+      mockDb.roomQueues.set(roomId, data.queue);
+    }
+
     try {
-      return await prisma.roomMusicState.update({
+      const dbState = await prisma.roomMusicState.update({
         where: { roomId },
         data: updateData,
         include: { currentTrack: true }
       });
+      return {
+        ...dbState,
+        queue: mockDb.roomQueues.get(roomId) || []
+      };
     } catch (_) {
       return mockDb.updateRoomMusicState(roomId, data);
     }

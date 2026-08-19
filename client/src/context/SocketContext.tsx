@@ -33,6 +33,7 @@ interface MusicState {
     isRoyaltyFree?: boolean;
     thumbnail?: string;
   } | null;
+  queue?: any[];
 }
 
 interface SocketContextType {
@@ -42,7 +43,7 @@ interface SocketContextType {
   sendChatMessage: (message: string) => void;
   sendReaction: (emoji: string) => void;
   sendMusicAction: (
-    action: 'play' | 'pause' | 'seek' | 'change',
+    action: 'play' | 'pause' | 'seek' | 'change' | 'queue-add' | 'queue-remove' | 'queue-pop',
     trackId?: string | null,
     position?: number,
     trackData?: { id: string; title: string; artist: string; url: string; duration: number; isRoyaltyFree?: boolean } | null
@@ -77,7 +78,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     currentTrackId: null,
     isPlaying: false,
     lastPosition: 0.0,
-    lastPositionUpdatedAt: 0
+    lastPositionUpdatedAt: 0,
+    queue: []
   });
 
   // Use ref for socket so all callbacks always have latest socket reference
@@ -103,9 +105,10 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       withCredentials: true,
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 500,
-      reconnectionDelayMax: 3000,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000
     });
 
     socketRef.current = sock;
@@ -115,7 +118,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       console.log(`[Socket] Connected: ${sock.id}`);
       setIsConnected(true);
       setSocket(sock); // ensure consumers see the connected socket
-      // Sync clock
+      // Sync clock immediately
       sock.emit('music:sync-ping', { clientTimestamp: Date.now() });
       // If joinRoom was called before socket connected, re-emit now
       if (pendingRoomJoinRef.current) {
@@ -208,11 +211,12 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     // Music state changes (Authoritative Server Events)
     sock.on('music:state-change', (payload: {
-      action: 'play' | 'pause' | 'seek' | 'change';
+      action: 'play' | 'pause' | 'seek' | 'change' | 'queue-add' | 'queue-remove' | 'queue-pop';
       trackId: string | null;
       position?: number;
       isPlaying?: boolean;
       trackData?: any;
+      queue?: any[];
       timestamp: number;
       stateVersion?: number;
       updatedBy?: string;
@@ -229,6 +233,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (payload.isPlaying !== undefined) next.isPlaying = payload.isPlaying;
         if (payload.position !== undefined) next.lastPosition = payload.position;
         if (payload.trackData !== undefined) next.currentTrack = payload.trackData;
+        if (payload.queue !== undefined) next.queue = payload.queue;
         next.lastPositionUpdatedAt = payload.timestamp;
         next.stateVersion = payload.stateVersion || Date.now();
         next.updatedBy = payload.updatedBy;

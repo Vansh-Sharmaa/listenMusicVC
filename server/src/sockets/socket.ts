@@ -154,7 +154,7 @@ export function setupSockets(io: Server) {
     // Handle synchronized music actions
     socket.on('music:action', async (payload: {
       roomId: string;
-      action: 'play' | 'pause' | 'seek' | 'change';
+      action: 'play' | 'pause' | 'seek' | 'change' | 'queue-add' | 'queue-remove' | 'queue-pop';
       trackId?: string | null;
       position?: number;
       timestamp?: number;
@@ -212,6 +212,33 @@ export function setupSockets(io: Server) {
             trackData: trackData || currentServerState?.currentTrack,
             updatedBy: currentUserId || socket.id
           });
+        } else if (action === 'queue-add') {
+          const newQueue = [...(currentServerState?.queue || []), trackData];
+          updatedState = await db.updateRoomMusicState(roomId, {
+            queue: newQueue,
+            updatedBy: currentUserId || socket.id
+          });
+        } else if (action === 'queue-remove') {
+          const newQueue = (currentServerState?.queue || []).filter((t: any) => t.id !== trackId);
+          updatedState = await db.updateRoomMusicState(roomId, {
+            queue: newQueue,
+            updatedBy: currentUserId || socket.id
+          });
+        } else if (action === 'queue-pop') {
+          const newQueue = [...(currentServerState?.queue || [])];
+          const nextTrack = newQueue.shift();
+          if (nextTrack) {
+            updatedState = await db.updateRoomMusicState(roomId, {
+              currentTrackId: nextTrack.id,
+              isPlaying: true,
+              lastPosition: 0.0,
+              trackData: nextTrack,
+              queue: newQueue,
+              updatedBy: currentUserId || socket.id
+            });
+          } else {
+            updatedState = currentServerState; // nothing to pop
+          }
         }
 
         const finalState = updatedState || currentServerState;
@@ -223,6 +250,7 @@ export function setupSockets(io: Server) {
           position: finalState?.lastPosition !== undefined ? finalState.lastPosition : calculatedPosition,
           isPlaying: finalState?.isPlaying,
           trackData: finalState?.currentTrack || trackData,
+          queue: finalState?.queue || [],
           timestamp: serverNow,
           stateVersion: finalState?.stateVersion || Date.now(),
           updatedBy: currentUserId || socket.id
