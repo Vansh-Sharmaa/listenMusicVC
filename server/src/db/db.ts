@@ -10,6 +10,8 @@ class MockDatabase {
   tracks = new Map<string, any>();
   roomMusicStates = new Map<string, any>();
   roomQueues = new Map<string, any[]>();
+  roomDjPasscodes = new Map<string, string>();
+  roomAuthorizedDjs = new Map<string, Set<string>>();
 
   constructor() {
     // Seed some royalty-free music tracks
@@ -83,6 +85,17 @@ class MockDatabase {
     this.participants.set(room.id, []);
     this.messages.set(room.id, []);
     
+    // Generate 4-digit DJ passcode
+    if (!this.roomDjPasscodes.has(roomId)) {
+      const code = Math.floor(1000 + Math.random() * 9000).toString();
+      this.roomDjPasscodes.set(roomId, code);
+      this.roomAuthorizedDjs.set(roomId, new Set([hostId]));
+    } else {
+      const djs = this.roomAuthorizedDjs.get(roomId) || new Set<string>();
+      djs.add(hostId);
+      this.roomAuthorizedDjs.set(roomId, djs);
+    }
+    
     // Initialize music state
     const musicState = {
       id: randomUUID(),
@@ -138,6 +151,11 @@ class MockDatabase {
       this.rooms.set(roomId, room);
       this.participants.set(roomId, []);
       this.messages.set(roomId, []);
+      if (!this.roomDjPasscodes.has(roomId)) {
+        const code = Math.floor(1000 + Math.random() * 9000).toString();
+        this.roomDjPasscodes.set(roomId, code);
+        this.roomAuthorizedDjs.set(roomId, new Set([userId]));
+      }
       const musicState = {
         id: randomUUID(),
         roomId,
@@ -502,5 +520,35 @@ export const db = {
     } catch (_) {
       return mockDb.updateRoomMusicState(roomId, data);
     }
+  },
+
+  getDjPasscode: (roomId: string) => {
+    let code = mockDb.roomDjPasscodes.get(roomId);
+    if (!code) {
+      code = Math.floor(1000 + Math.random() * 9000).toString();
+      mockDb.roomDjPasscodes.set(roomId, code);
+    }
+    return code;
+  },
+
+  isDjAuthorized: async (roomId: string, userId: string) => {
+    const room = await db.getRoom(roomId);
+    if (room?.hostId && room.hostId === userId) return true;
+    const authDjs = mockDb.roomAuthorizedDjs.get(roomId);
+    return Boolean(authDjs && authDjs.has(userId));
+  },
+
+  authorizeDjUser: async (roomId: string, userId: string, passcode: string) => {
+    const correctCode = db.getDjPasscode(roomId);
+    if (passcode.trim() === correctCode) {
+      let djs = mockDb.roomAuthorizedDjs.get(roomId);
+      if (!djs) {
+        djs = new Set<string>();
+        mockDb.roomAuthorizedDjs.set(roomId, djs);
+      }
+      djs.add(userId);
+      return true;
+    }
+    return false;
   }
 };

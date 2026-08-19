@@ -160,7 +160,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   onLeave
 }) => {
   // Context hooks
-  const { socket, joinRoom, sendReaction, participants, isConnected, musicState, sendMusicAction, getServerTime, isHost, hostId, permissionError, clearPermissionError } = useSocket();
+  const { socket, joinRoom, sendReaction, participants, isConnected, musicState, sendMusicAction, getServerTime, isHost, hostId, isDjAuthorized, permissionError, clearPermissionError } = useSocket();
   const {
     initAudio,
     processLocalMicTrack,
@@ -598,8 +598,8 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
   // Handle user seeking on the shared timeline bar
   const handleSeek = (newTime: number) => {
-    if (!isHost) {
-      alert('👑 Only the room creator / admin can seek or control the music.');
+    if (!isDjAuthorized) {
+      alert('👑 Only the room creator (Host) or authorized DJs with the 4-digit PIN can seek or control the music.');
       return;
     }
     isSeekingRef.current = false;
@@ -1902,14 +1902,14 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                           min={0}
                           max={songProgress.duration > 0 ? songProgress.duration : (musicState.currentTrack?.duration || 240)}
                           value={songProgress.current}
-                          disabled={!isHost}
-                          onMouseDown={() => { if (isHost) isSeekingRef.current = true; }}
-                          onTouchStart={() => { if (isHost) isSeekingRef.current = true; }}
-                          onChange={(e) => { if (isHost) setSongProgress(prev => ({ ...prev, current: parseFloat(e.target.value) })); }}
-                          onMouseUp={(e) => { if (isHost) handleSeek(parseFloat((e.target as HTMLInputElement).value)); }}
-                          onTouchEnd={(e) => { if (isHost) handleSeek(parseFloat((e.target as HTMLInputElement).value)); }}
-                          className={`flex-1 accent-fuchsia-500 h-1.5 bg-white/20 rounded-lg transition-all ${isHost ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
-                          title={isHost ? "Scrub timeline (Room Host)" : "Synced with Room Host (Admin)"}
+                          disabled={!isDjAuthorized}
+                          onMouseDown={() => { if (isDjAuthorized) isSeekingRef.current = true; }}
+                          onTouchStart={() => { if (isDjAuthorized) isSeekingRef.current = true; }}
+                          onChange={(e) => { if (isDjAuthorized) setSongProgress(prev => ({ ...prev, current: parseFloat(e.target.value) })); }}
+                          onMouseUp={(e) => { if (isDjAuthorized) handleSeek(parseFloat((e.target as HTMLInputElement).value)); }}
+                          onTouchEnd={(e) => { if (isDjAuthorized) handleSeek(parseFloat((e.target as HTMLInputElement).value)); }}
+                          className={`flex-1 accent-fuchsia-500 h-1.5 bg-white/20 rounded-lg transition-all ${isDjAuthorized ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+                          title={isDjAuthorized ? "Scrub timeline (DJ Control)" : "Synced with Room DJ (Enter PIN to unlock)"}
                         />
                         <span className="text-xs text-white/60 font-mono w-10">
                           {Math.floor((songProgress.duration || musicState.currentTrack?.duration || 0) / 60)}:{(Math.floor((songProgress.duration || musicState.currentTrack?.duration || 0) % 60)).toString().padStart(2, '0')}
@@ -1920,17 +1920,17 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                         <div className="flex items-center gap-2">
                           <button
                             onClick={handleSkipPrev}
-                            disabled={!isHost}
-                            className={`p-2 rounded-xl text-xs transition-all border ${isHost ? 'bg-white/10 hover:bg-white/20 text-white active:scale-95 border-white/15' : 'bg-white/5 text-white/30 border-white/5 cursor-not-allowed'}`}
-                            title={isHost ? "Previous Track" : "Only Host can change tracks"}
+                            disabled={!isDjAuthorized}
+                            className={`p-2 rounded-xl text-xs transition-all border ${isDjAuthorized ? 'bg-white/10 hover:bg-white/20 text-white active:scale-95 border-white/15' : 'bg-white/5 text-white/30 border-white/5 cursor-not-allowed'}`}
+                            title={isDjAuthorized ? "Previous Track" : "Only Host or PIN-Authorized DJs can change tracks"}
                           >
                             <SkipBack size={14} />
                           </button>
 
                           <button
                             onClick={() => {
-                              if (!isHost) {
-                                alert('👑 Only the room host / admin can control playback.');
+                              if (!isDjAuthorized) {
+                                alert('👑 Only the room creator (Host) or users with the 4-digit DJ PIN can control playback.');
                                 return;
                               }
                               let currentPos = musicState.lastPosition || 0;
@@ -1947,21 +1947,21 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                               }
                             }}
                             className={`px-4 py-2 rounded-xl font-bold transition-all flex items-center gap-2 text-xs shadow-md ${
-                              isHost
+                              isDjAuthorized
                                 ? 'bg-fuchsia-600 hover:bg-fuchsia-500 text-white active:scale-95 shadow-fuchsia-950/40'
                                 : 'bg-white/10 text-white/50 cursor-not-allowed'
                             }`}
-                            title={isHost ? "Play/Pause (Room Host)" : "Controlled by Room Host"}
+                            title={isDjAuthorized ? "Play/Pause" : "Controlled by Room Host (Enter PIN to unlock)"}
                           >
                             {musicState.isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
-                            <span>{isHost ? (musicState.isPlaying ? 'Pause for Room' : 'Play for Room') : (musicState.isPlaying ? 'Playing (Host Controlled)' : 'Paused (Host Controlled)')}</span>
+                            <span>{isDjAuthorized ? (musicState.isPlaying ? 'Pause for Room' : 'Play for Room') : (musicState.isPlaying ? 'Playing (Host Controlled)' : 'Paused (Host Controlled)')}</span>
                           </button>
 
                           <button
                             onClick={handleSkipNext}
-                            disabled={!isHost}
-                            className={`p-2 rounded-xl text-xs transition-all border ${isHost ? 'bg-white/10 hover:bg-white/20 text-white active:scale-95 border-white/15' : 'bg-white/5 text-white/30 border-white/5 cursor-not-allowed'}`}
-                            title={isHost ? "Next Track" : "Only Host can change tracks"}
+                            disabled={!isDjAuthorized}
+                            className={`p-2 rounded-xl text-xs transition-all border ${isDjAuthorized ? 'bg-white/10 hover:bg-white/20 text-white active:scale-95 border-white/15' : 'bg-white/5 text-white/30 border-white/5 cursor-not-allowed'}`}
+                            title={isDjAuthorized ? "Next Track" : "Only Host or PIN-Authorized DJs can change tracks"}
                           >
                             <SkipForward size={14} />
                           </button>
@@ -2042,7 +2042,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  {isHost && (
+                  {isDjAuthorized && (
                     <button
                       onClick={handleSkipPrev}
                       className="p-1.5 rounded-lg text-xs bg-white/5 hover:bg-white/15 border border-white/10 text-white/80 hover:text-white transition-all"
@@ -2052,7 +2052,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                     </button>
                   )}
 
-                  {isHost ? (
+                  {isDjAuthorized ? (
                     <button
                       onClick={() => {
                         let currentPos = musicState.lastPosition || 0;
@@ -2074,11 +2074,11 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                     </button>
                   ) : (
                     <span className="text-[10px] font-bold px-2 py-1 rounded-lg bg-white/5 text-white/40 border border-white/10">
-                      👑 Host DJ
+                      🔒 In Sync
                     </span>
                   )}
 
-                  {isHost && (
+                  {isDjAuthorized && (
                     <button
                       onClick={handleSkipNext}
                       className="p-1.5 rounded-lg text-xs bg-white/5 hover:bg-white/15 border border-white/10 text-white/80 hover:text-white transition-all"
@@ -2123,22 +2123,22 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                   max={Math.max(1, songProgress.duration || 180)}
                   step="0.5"
                   value={songProgress.current}
-                  disabled={!isHost}
-                  onMouseDown={() => { if (isHost) isSeekingRef.current = true; }}
-                  onTouchStart={() => { if (isHost) isSeekingRef.current = true; }}
+                  disabled={!isDjAuthorized}
+                  onMouseDown={() => { if (isDjAuthorized) isSeekingRef.current = true; }}
+                  onTouchStart={() => { if (isDjAuthorized) isSeekingRef.current = true; }}
                   onChange={(e) => {
-                    if (isHost) {
+                    if (isDjAuthorized) {
                       const val = parseFloat(e.target.value);
                       setSongProgress(prev => ({ ...prev, current: val }));
                     }
                   }}
                   onMouseUp={(e) => {
-                    if (isHost) handleSeek(parseFloat((e.target as HTMLInputElement).value));
+                    if (isDjAuthorized) handleSeek(parseFloat((e.target as HTMLInputElement).value));
                   }}
                   onTouchEnd={(e) => {
-                    if (isHost) handleSeek(parseFloat((e.target as HTMLInputElement).value));
+                    if (isDjAuthorized) handleSeek(parseFloat((e.target as HTMLInputElement).value));
                   }}
-                  className={`flex-1 h-1.5 bg-white/10 rounded-lg appearance-none accent-fuchsia-500 transition-all ${isHost ? 'cursor-pointer hover:h-2' : 'cursor-not-allowed opacity-50'}`}
+                  className={`flex-1 h-1.5 bg-white/10 rounded-lg appearance-none accent-fuchsia-500 transition-all ${isDjAuthorized ? 'cursor-pointer hover:h-2' : 'cursor-not-allowed opacity-50'}`}
                 />
                 <span className="text-[10px] text-white/50 font-mono w-7">
                   {Math.floor((songProgress.duration || 180) / 60)}:{Math.floor((songProgress.duration || 180) % 60).toString().padStart(2, '0')}

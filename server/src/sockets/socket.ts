@@ -56,10 +56,16 @@ export function setupSockets(io: Server) {
         }
         (socket as any).data = { userId, username, roomId };
 
+        const isHost = Boolean(room?.hostId && room.hostId === userId);
+        const isDjAuthorized = await db.isDjAuthorized(roomId, userId);
+        const djPasscode = isHost ? db.getDjPasscode(roomId) : undefined;
+
         // Send room state confirmation
         socket.emit('room:joined', {
           roomName: room?.name,
           hostId: room?.hostId,
+          djPasscode,
+          isDjAuthorized,
           participants: room?.participants || [],
           musicState,
           chatHistory,
@@ -152,6 +158,39 @@ export function setupSockets(io: Server) {
       });
     });
 
+    // Handle unlocking DJ permissions using 4-digit PIN
+    socket.on('room:unlock-dj', async (payload: { roomId: string; passcode: string }) => {
+      const { roomId, passcode } = payload;
+      const targetUserId = currentUserId || (socket as any)?.data?.userId;
+      if (!roomId || !targetUserId || !passcode) return;
+
+      try {
+        const isSuccess = await db.authorizeDjUser(roomId, targetUserId, passcode);
+        if (isSuccess) {
+          console.log(`[DJ Unlocked] User ${currentUsername} (${targetUserId}) unlocked DJ access in room ${roomId}`);
+          socket.emit('room:dj-unlocked', {
+            isDjAuthorized: true,
+            message: '🎉 DJ Access Unlocked! You can now change songs, search music, and control playback.'
+          });
+
+          // Broadcast system message in chat
+          io.to(roomId).emit('chat:message', {
+            id: `sys-${Date.now()}`,
+            userId: 'system',
+            username: 'System',
+            message: `🔑 ${currentUsername || 'A participant'} entered the DJ PIN and unlocked music controls!`,
+            createdAt: new Date().toISOString()
+          });
+        } else {
+          socket.emit('room:dj-unlock-failed', {
+            message: '❌ Incorrect 4-digit DJ PIN. Please ask the room host for the correct code.'
+          });
+        }
+      } catch (error) {
+        console.error('Error unlocking DJ access:', error);
+      }
+    });
+
     // Handle synchronized music actions
     socket.on('music:action', async (payload: {
       roomId: string;
@@ -165,15 +204,14 @@ export function setupSockets(io: Server) {
       if (!roomId) return;
 
       try {
-        // Enforce Host-Only / Admin Music Control
-        const room = await db.getRoom(roomId);
-        const hostId = room?.hostId;
+        // Enforce Host or PIN-Authorized DJ Permission Check
         const requesterId = currentUserId || (socket as any)?.data?.userId;
+        const isAuthorized = await db.isDjAuthorized(roomId, requesterId);
 
-        if (hostId && requesterId && requesterId !== hostId) {
-          console.warn(`[Music Permission Denied] User ${currentUsername} (${requesterId}) is not the host (${hostId}) of room ${roomId}`);
+        if (!isAuthorized) {
+          console.warn(`[Music Permission Denied] User ${currentUsername} (${requesterId}) is not authorized as DJ in room ${roomId}`);
           socket.emit('music:permission-denied', {
-            message: 'Only the room creator (Admin / Host) can change or control the music.',
+            message: 'Only the room creator (Host) or users with the 4-digit DJ PIN can change or control the music.',
             action
           });
           return;

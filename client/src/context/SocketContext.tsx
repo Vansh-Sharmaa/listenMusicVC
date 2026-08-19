@@ -57,6 +57,12 @@ interface SocketContextType {
   roomName: string;
   hostId: string | null;
   isHost: boolean;
+  djPasscode: string | null;
+  isDjAuthorized: boolean;
+  unlockDj: (passcode: string) => void;
+  unlockError: string | null;
+  unlockSuccess: string | null;
+  clearUnlockError: () => void;
   permissionError: string | null;
   clearPermissionError: () => void;
 }
@@ -77,6 +83,10 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [roomName, setRoomName] = useState<string>('');
   const [hostId, setHostId] = useState<string | null>(null);
+  const [djPasscode, setDjPasscode] = useState<string | null>(null);
+  const [isDjAuthorizedState, setIsDjAuthorizedState] = useState<boolean>(false);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [unlockSuccess, setUnlockSuccess] = useState<string | null>(null);
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [activeReaction, setActiveReaction] = useState<SocketContextType['activeReaction']>(null);
@@ -90,7 +100,12 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   });
 
   const isHost = Boolean(hostId && myUserId && hostId === myUserId);
+  const isDjAuthorized = isHost || isDjAuthorizedState;
   const clearPermissionError = useCallback(() => setPermissionError(null), []);
+  const clearUnlockError = useCallback(() => {
+    setUnlockError(null);
+    setUnlockSuccess(null);
+  }, []);
 
   // Use ref for socket so all callbacks always have latest socket reference
   // Also track as state so consumers can react to socket being available
@@ -163,14 +178,22 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     sock.on('room:joined', (payload: {
       roomName: string;
       hostId?: string;
+      djPasscode?: string;
+      isDjAuthorized?: boolean;
       participants: any[];
       musicState: any;
       chatHistory: ChatMessage[];
     }) => {
-      console.log(`[Socket] room:joined - name: "${payload.roomName}", hostId: "${payload.hostId}", participants: ${payload.participants?.length}`);
+      console.log(`[Socket] room:joined - name: "${payload.roomName}", hostId: "${payload.hostId}", isDj: ${payload.isDjAuthorized}`);
       setRoomName(payload.roomName || '');
       if (payload.hostId) {
         setHostId(payload.hostId);
+      }
+      if (payload.djPasscode) {
+        setDjPasscode(payload.djPasscode);
+      }
+      if (payload.isDjAuthorized !== undefined) {
+        setIsDjAuthorizedState(payload.isDjAuthorized);
       }
       setChatMessages(payload.chatHistory || []);
       if (payload.participants) {
@@ -183,6 +206,21 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (payload.musicState) {
         setMusicState(payload.musicState);
       }
+    });
+
+    // DJ PIN Unlock responses
+    sock.on('room:dj-unlocked', (payload: { isDjAuthorized: boolean; message: string }) => {
+      console.log(`[Socket] DJ access unlocked!`, payload);
+      setIsDjAuthorizedState(true);
+      setUnlockSuccess(payload.message || '🎉 DJ Access Unlocked!');
+      setUnlockError(null);
+      setTimeout(() => setUnlockSuccess(null), 5000);
+    });
+
+    sock.on('room:dj-unlock-failed', (payload: { message: string }) => {
+      console.warn(`[Socket] DJ unlock failed:`, payload.message);
+      setUnlockError(payload.message || 'Incorrect 4-digit DJ PIN.');
+      setUnlockSuccess(null);
     });
 
     // Permission denied on music actions (if non-host tries to change track)
@@ -345,6 +383,17 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
   }, []);
 
+  const unlockDj = useCallback((passcode: string) => {
+    const sock = socketRef.current;
+    if (sock && roomIdRef.current) {
+      setUnlockError(null);
+      sock.emit('room:unlock-dj', {
+        roomId: roomIdRef.current,
+        passcode: passcode.trim()
+      });
+    }
+  }, []);
+
   // Expose socket as state (triggers re-renders in consumers on connect/disconnect)
   return (
     <SocketContext.Provider
@@ -364,6 +413,12 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         roomName,
         hostId,
         isHost,
+        djPasscode,
+        isDjAuthorized,
+        unlockDj,
+        unlockError,
+        unlockSuccess,
+        clearUnlockError,
         permissionError,
         clearPermissionError
       }}

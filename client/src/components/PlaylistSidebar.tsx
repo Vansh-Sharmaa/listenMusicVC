@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useSocket } from '../context/SocketContext';
 import { useAudioMixer } from '../context/AudioMixerContext';
-import { Play, Pause, Music, Upload, Loader2, Plus, Volume2, Link as LinkIcon, Radio, Share2, Disc, Zap, ExternalLink } from 'lucide-react';
+import { Play, Pause, Music, Upload, Loader2, Plus, Volume2, Link as LinkIcon, Radio, Share2, Disc, Zap, ExternalLink, Key, Copy, Check } from 'lucide-react';
 
 
 import { parseMediaUrl, extractYouTubeId, isYouTubeUrl, isSpotifyUrl, isMonochromeUrl, extractSpotifyInfo } from '../utils/mediaPlatform';
@@ -25,11 +25,27 @@ interface PlaylistSidebarProps {
 
 export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark', onStartScreenShare }) => {
   const isLight = theme === 'light';
-  const { musicState, sendMusicAction, isHost, hostId, permissionError, clearPermissionError } = useSocket();
+  const {
+    musicState,
+    sendMusicAction,
+    isHost,
+    hostId,
+    djPasscode,
+    isDjAuthorized,
+    unlockDj,
+    unlockError,
+    unlockSuccess,
+    clearUnlockError,
+    permissionError,
+    clearPermissionError
+  } = useSocket();
   const { registerRemoteScreenShareTrack } = useAudioMixer();
 
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [copiedPin, setCopiedPin] = useState(false);
 
   // Quick YouTube / Song URL input bar
   const [quickUrl, setQuickUrl] = useState('');
@@ -229,8 +245,8 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
   const activeTrack = tracks.find(t => t.id === musicState.currentTrackId) || musicState.currentTrack;
 
   const handlePlayPause = () => {
-    if (!isHost) {
-      alert('👑 Only the room host / admin can play, pause, or change the music.');
+    if (!isDjAuthorized) {
+      setShowPinModal(true);
       return;
     }
     const currentPos = musicState.lastPosition || 0;
@@ -243,8 +259,8 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
   };
 
   const handleTrackSelect = (track: MusicTrack) => {
-    if (!isHost) {
-      alert('👑 Only the room host / admin can change the music for everyone.');
+    if (!isDjAuthorized) {
+      setShowPinModal(true);
       return;
     }
     sendMusicAction('change', track.id, 0, track);
@@ -376,8 +392,8 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
   // Handle Quick Play or Search Submit
   const handleQuickPlay = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isHost) {
-      alert('👑 Only the room host / admin can search and play music for the room.');
+    if (!isDjAuthorized) {
+      setShowPinModal(true);
       return;
     }
     const query = searchQuery.trim();
@@ -459,7 +475,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
           <Music size={20} className={isLight ? "text-fuchsia-600" : "text-fuchsia-400"} />
           <h2 className="text-lg font-semibold tracking-wide">Shared Music Hub</h2>
         </div>
-        {isHost && (
+        {isDjAuthorized && (
           <button
             onClick={() => setShowAddModal(true)}
             className="bg-fuchsia-600 hover:bg-fuchsia-500 transition-all p-1.5 rounded-lg active:scale-95 flex items-center justify-center text-white shadow-md shadow-fuchsia-950/40"
@@ -470,25 +486,68 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
         )}
       </div>
 
-      {/* Host DJ Status Banner */}
-      <div className={`px-3 py-2 text-[11px] font-semibold border-b flex items-center justify-between ${
+      {/* Host DJ Passcode / Listener DJ Unlock Status Banner */}
+      <div className={`p-3 border-b flex flex-col gap-2 ${
         isHost
-          ? isLight ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-amber-950/30 border-amber-500/20 text-amber-300'
-          : isLight ? 'bg-black/5 border-black/5 text-black/60' : 'bg-white/5 border-white/5 text-white/50'
+          ? isLight ? 'bg-amber-50/80 border-amber-200 text-amber-900' : 'bg-amber-950/30 border-amber-500/20 text-amber-200'
+          : isDjAuthorized
+          ? isLight ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-emerald-950/30 border-emerald-500/20 text-emerald-200'
+          : isLight ? 'bg-black/5 border-black/5 text-black/70' : 'bg-white/5 border-white/5 text-white/70'
       }`}>
-        <div className="flex items-center gap-1.5 truncate">
-          <span>👑</span>
-          <span className="truncate">
-            {isHost ? 'You are the Room Host (Admin DJ)' : 'Host-Only DJ Mode Active'}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 font-bold text-xs">
+            <span>{isHost ? '👑' : isDjAuthorized ? '🎉' : '🔒'}</span>
+            <span>
+              {isHost
+                ? 'Host DJ Admin'
+                : isDjAuthorized
+                ? 'Co-DJ (PIN Unlocked)'
+                : 'Listener Mode (Synced)'}
+            </span>
+          </div>
+          <span className={`text-[9px] px-2 py-0.5 rounded-full font-mono uppercase font-bold ${
+            isHost
+              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+              : isDjAuthorized
+              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+              : 'bg-white/10 text-white/40 border border-white/10'
+          }`}>
+            {isHost ? 'HOST DJ' : isDjAuthorized ? 'CO-DJ' : 'LISTENER'}
           </span>
         </div>
-        <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase font-bold ${
-          isHost
-            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-            : 'bg-white/10 text-white/40 border border-white/10'
-        }`}>
-          {isHost ? 'DJ ADMIN' : 'LISTENER'}
-        </span>
+
+        {/* If user is Host, show their 4-digit PIN with 1-click copy */}
+        {isHost && djPasscode && (
+          <div className="flex items-center justify-between bg-black/20 rounded-xl p-2 border border-amber-500/30">
+            <div className="flex flex-col">
+              <span className="text-[9px] uppercase tracking-wider text-amber-400 font-bold">Your Room DJ Passcode:</span>
+              <span className="text-base font-mono font-black tracking-widest text-amber-300">{djPasscode}</span>
+            </div>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(djPasscode);
+                setCopiedPin(true);
+                setTimeout(() => setCopiedPin(false), 2000);
+              }}
+              className="bg-amber-500 hover:bg-amber-400 text-black px-2.5 py-1 rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center gap-1 shadow-md shadow-amber-950/40"
+              title="Copy PIN to share with friends"
+            >
+              {copiedPin ? <Check size={12} /> : <Copy size={12} />}
+              <span>{copiedPin ? 'Copied!' : 'Copy PIN'}</span>
+            </button>
+          </div>
+        )}
+
+        {/* If user is NOT host and NOT unlocked, show button to enter PIN */}
+        {!isHost && !isDjAuthorized && (
+          <button
+            onClick={() => setShowPinModal(true)}
+            className="w-full bg-gradient-to-r from-amber-500 to-fuchsia-600 hover:from-amber-400 hover:to-fuchsia-500 text-white py-1.5 px-3 rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-1.5 shadow-md shadow-fuchsia-950/40"
+          >
+            <Key size={13} />
+            <span>Enter 4-Digit DJ PIN to Unlock</span>
+          </button>
+        )}
       </div>
 
       {/* Permission Denied Alert Toast */}
@@ -496,6 +555,14 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
         <div className="p-2.5 bg-red-500/20 border-b border-red-500/30 text-red-200 text-xs flex items-center justify-between animate-fade-in">
           <span>⚠️ {permissionError}</span>
           <button onClick={clearPermissionError} className="text-xs font-bold px-1.5 text-red-300">✕</button>
+        </div>
+      )}
+
+      {/* Unlock Success Toast */}
+      {unlockSuccess && (
+        <div className="p-2.5 bg-emerald-500/20 border-b border-emerald-500/30 text-emerald-200 text-xs flex items-center justify-between animate-fade-in">
+          <span>{unlockSuccess}</span>
+          <button onClick={clearUnlockError} className="text-xs font-bold px-1.5 text-emerald-300">✕</button>
         </div>
       )}
 
@@ -548,8 +615,8 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
-                if (!isHost) {
-                  alert('👑 Only the room host / admin can add or play Monochrome music.');
+                if (!isDjAuthorized) {
+                  setShowPinModal(true);
                   return;
                 }
                 const url = monoUrl.trim();
@@ -1089,6 +1156,96 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
                 </button>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 4-Digit DJ Passcode Unlock Modal */}
+      {showPinModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-[#18181b] border border-white/10 w-full max-w-sm p-6 rounded-3xl shadow-2xl text-white space-y-4 relative">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400">
+                  <Key size={18} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm">Enter DJ Passcode</h3>
+                  <p className="text-[10px] text-white/50">4-digit PIN from room host</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowPinModal(false);
+                  setPinInput('');
+                  clearUnlockError();
+                }}
+                className="text-white/40 hover:text-white text-xs font-bold px-2 py-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-white/70 leading-relaxed">
+              The room creator set this room to <strong>Host-Only DJ Mode</strong>. Enter their 4-digit PIN to unlock full song controls:
+            </p>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (pinInput.trim().length === 4) {
+                  unlockDj(pinInput.trim());
+                  setShowPinModal(false);
+                  setPinInput('');
+                }
+              }}
+              className="space-y-4"
+            >
+              <div className="flex justify-center">
+                <input
+                  type="text"
+                  maxLength={4}
+                  required
+                  autoFocus
+                  pattern="[0-9]{4}"
+                  inputMode="numeric"
+                  value={pinInput}
+                  onChange={(e) => {
+                    const cleaned = e.target.value.replace(/[^0-9]/g, '').slice(0, 4);
+                    setPinInput(cleaned);
+                  }}
+                  placeholder="• • • •"
+                  className="w-48 text-center bg-white/5 border border-amber-500/40 rounded-2xl py-3 text-2xl font-mono tracking-[0.6em] font-black focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-500/30 text-amber-300 placeholder-white/20 transition-all shadow-inner"
+                />
+              </div>
+
+              {unlockError && (
+                <p className="text-xs text-red-400 text-center font-medium bg-red-500/10 py-1.5 px-3 rounded-xl border border-red-500/20">
+                  {unlockError}
+                </p>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPinModal(false);
+                    setPinInput('');
+                    clearUnlockError();
+                  }}
+                  className="flex-1 bg-white/5 hover:bg-white/10 text-white/70 py-2.5 rounded-xl text-xs font-semibold transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={pinInput.trim().length !== 4}
+                  className="flex-1 bg-gradient-to-r from-amber-500 to-fuchsia-600 hover:from-amber-400 hover:to-fuchsia-500 disabled:opacity-40 text-white py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 shadow-lg shadow-fuchsia-950/40"
+                >
+                  Unlock DJ
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
