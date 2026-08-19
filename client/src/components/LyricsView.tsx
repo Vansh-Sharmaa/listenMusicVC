@@ -1,9 +1,10 @@
-﻿'use client';
+'use client';
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { fetchLyrics, LyricsData, LyricLine } from '../utils/lyrics';
 import { motion } from 'motion/react';
 import { Mic2, Loader2, Music2, Disc } from 'lucide-react';
+import { extractPaletteFromImage, SongColorPalette } from '../utils/colorExtractor';
 
 interface LyricsViewProps {
   currentTrack: {
@@ -22,7 +23,7 @@ interface LyricsViewProps {
   isFloating?: boolean;
 }
 
-const SPRING_CFG = { type: 'spring', stiffness: 280, damping: 32, mass: 0.9 } as const;
+const SPRING_CFG = { type: 'spring', stiffness: 220, damping: 28, mass: 0.9 } as const;
 
 export const LyricsView: React.FC<LyricsViewProps> = ({
   currentTrack,
@@ -44,12 +45,24 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
   const lyricsRef = useRef<LyricsData | null>(null);
   const activeLineIndexRef = useRef<number>(-1);
+  const [songPalette, setSongPalette] = useState<SongColorPalette | null>(null);
 
   // Word span refs: wordSpanRefs[lineIndex][wordIndex] -> HTMLSpanElement
   const wordSpanRefs = useRef<HTMLSpanElement[][]>([]);
   const rafRef = useRef<number | null>(null);
   const isLightRef = useRef(isLight);
   useEffect(() => { isLightRef.current = isLight; }, [isLight]);
+
+  // Extract song palette colors for fluid dynamic ambient backdrop
+  useEffect(() => {
+    if (currentTrack?.thumbnail) {
+      extractPaletteFromImage(currentTrack.thumbnail).then(palette => {
+        setSongPalette(palette);
+      });
+    } else {
+      setSongPalette(null);
+    }
+  }, [currentTrack?.thumbnail]);
 
   // 1. Fetch lyrics
   useEffect(() => {
@@ -84,7 +97,7 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
     }
   }, [currentTime, lyrics]);
 
-  // 3. Smooth auto-scroll
+  // 3. Smooth auto-scroll to center the active line
   useEffect(() => {
     if (userIsScrolling || activeLineIndex < 0) return;
     const el = lineRefs.current[activeLineIndex];
@@ -133,23 +146,29 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
               if (isFullyLit) {
                 span.style.color = 'rgba(0,0,0,0.96)';
                 span.style.textShadow = '0 0 12px rgba(0,0,0,0.45)';
+                span.style.transform = 'scale(1.025)';
               } else if (isCurrentWord) {
                 span.style.color = `rgba(0,0,0,${0.28 + p * 0.68})`;
                 span.style.textShadow = `0 0 ${4 + p * 10}px rgba(0,0,0,${0.08 + p * 0.37})`;
+                span.style.transform = `scale(${1.0 + p * 0.025})`;
               } else {
                 span.style.color = 'rgba(0,0,0,0.28)';
                 span.style.textShadow = 'none';
+                span.style.transform = 'scale(1.0)';
               }
             } else {
               if (isFullyLit) {
                 span.style.color = 'rgba(255,255,255,0.98)';
                 span.style.textShadow = '0 0 20px rgba(255,255,255,0.9), 0 0 38px rgba(255,255,255,0.4)';
+                span.style.transform = 'scale(1.03)';
               } else if (isCurrentWord) {
                 span.style.color = `rgba(255,255,255,${0.26 + p * 0.72})`;
                 span.style.textShadow = `0 0 ${5 + p * 22}px rgba(255,255,255,${0.08 + p * 0.82})`;
+                span.style.transform = `scale(${1.0 + p * 0.03})`;
               } else {
                 span.style.color = 'rgba(255,255,255,0.26)';
                 span.style.textShadow = 'none';
+                span.style.transform = 'scale(1.0)';
               }
             }
           }
@@ -174,7 +193,27 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
   }
 
   return (
-    <div className={`flex flex-col h-full w-full relative overflow-hidden select-none transition-colors duration-500 ${isLight ? 'text-black' : 'text-white'}`}>
+    <div className={`flex flex-col h-full w-full relative overflow-hidden select-none transition-colors duration-500 ${isLight ? 'bg-white text-black' : 'bg-black/35 text-white'}`}>
+      
+      {/* Dynamic Fluid Backdrop Mesh (Apple Music style) */}
+      <div 
+        className="absolute inset-0 z-0 pointer-events-none opacity-40 transition-all duration-1000"
+        style={{
+          background: songPalette
+            ? `radial-gradient(circle at 15% 20%, ${songPalette.primary}, transparent 55%), radial-gradient(circle at 85% 80%, ${songPalette.secondary}, transparent 55%), radial-gradient(circle at 50% 50%, ${songPalette.darkMuted}, transparent 75%)`
+            : undefined
+        }}
+      />
+      {currentTrack?.thumbnail && (
+        <div 
+          className="absolute inset-0 z-0 bg-cover bg-center pointer-events-none opacity-20 mix-blend-screen transition-all duration-1000"
+          style={{ 
+            backgroundImage: `url(${currentTrack.thumbnail})`,
+            filter: 'blur(90px) saturate(140%) brightness(0.7)',
+            transform: 'scale(1.15)'
+          }} 
+        />
+      )}
 
       {/* Header */}
       <div className={`p-4 border-b flex items-center justify-between z-10 backdrop-blur-2xl ${isLight ? 'bg-white/40 border-black/5' : 'bg-black/30 border-white/5'}`}>
@@ -200,12 +239,16 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
         )}
       </div>
 
-      {/* Lyrics body */}
+      {/* Lyrics body (with top/bottom gradient fade masks) */}
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 md:px-8 py-14 space-y-5 scrollbar-none"
-        style={{ scrollBehavior: 'smooth' }}
+        className="flex-1 overflow-y-auto px-4 md:px-8 py-16 space-y-6 scrollbar-none relative z-10"
+        style={{ 
+          scrollBehavior: 'smooth',
+          maskImage: 'linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%)'
+        }}
       >
         {loading ? (
           <div className="flex flex-col items-center justify-center py-24 gap-3 opacity-60">
@@ -220,7 +263,7 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
           </div>
         ) : (
           <>
-            <div className="h-24" />
+            <div className="h-32" />
             {lyrics.lines.map((line: LyricLine, index: number) => {
               const isActive = index === activeLineIndex;
               const isPast = index < activeLineIndex;
@@ -233,20 +276,21 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
                 <div
                   key={`${line.time}-${index}`}
                   ref={(el) => { lineRefs.current[index] = el; }}
+                  className="transition-all duration-500"
                 >
                   <motion.button
                     onClick={() => onSeek(line.time)}
                     animate={{
-                      opacity: isActive ? 1 : isPast ? 0.38 : 0.24,
-                      filter: isActive ? 'blur(0px)' : isPast ? 'blur(0.4px)' : 'blur(1.4px)',
-                      scale: isActive ? 1.025 : 1,
+                      opacity: isActive ? 1 : isPast ? 0.38 : 0.22,
+                      filter: isActive ? 'blur(0px)' : isPast ? 'blur(0.3px)' : 'blur(1.6px)',
+                      scale: isActive ? 1.04 : 0.96,
                     }}
                     transition={SPRING_CFG}
-                    className="w-full text-left relative py-2 px-3 rounded-2xl focus:outline-none select-none group"
+                    className="w-full text-left relative py-2.5 px-4 rounded-[24px] focus:outline-none select-none group"
                     style={{ transformOrigin: 'left center' }}
                     whileHover={!isActive ? { opacity: 0.72, filter: 'blur(0px)', transition: { duration: 0.14 } } : undefined}
                   >
-                    <p className="text-xl md:text-3xl leading-relaxed tracking-tight font-black m-0">
+                    <p className="text-xl sm:text-2xl md:text-3.5xl leading-relaxed tracking-tight font-black m-0 font-sans break-words whitespace-pre-wrap">
                       {tokens.map((token, tIdx) => {
                         if (token.trim().length === 0) {
                           return <span key={tIdx}>{token}</span>;
@@ -261,14 +305,14 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
                                 wordSpanRefs.current[index][wordIdx] = el;
                               }
                             }}
-                            className="inline-block"
+                            className="inline-block transition-transform duration-300"
                             style={{
                               // Initial color based on line state; RAF will override for active line
                               color: isActive
                                 ? (isLight ? 'rgba(0,0,0,0.28)' : 'rgba(255,255,255,0.26)')
                                 : isPast
                                 ? (isLight ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)')
-                                : (isLight ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.5)'),
+                                : (isLight ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.4)'),
                             }}
                           >
                             {token}
@@ -280,17 +324,17 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
                 </div>
               );
             })}
-            <div className="h-40" />
+            <div className="h-48" />
           </>
         )}
       </div>
 
       {/* Footer */}
       {lyrics && lyrics.synced && (
-        <div className={`p-3 px-4 text-center border-t text-[10px] tracking-widest font-bold uppercase flex items-center justify-center gap-2 backdrop-blur-2xl ${isLight ? 'bg-white/30 border-black/5 text-black/30' : 'bg-black/30 border-white/5 text-white/25'}`}>
-          <span className={`h-1 w-1 rounded-full ${isPlaying ? 'bg-fuchsia-400 animate-pulse' : 'bg-white/30'}`} />
+        <div className={`p-3 px-4 text-center border-t text-[10px] tracking-widest font-bold uppercase flex items-center justify-center gap-2 backdrop-blur-2xl relative z-10 ${isLight ? 'bg-white/30 border-black/5 text-black/30' : 'bg-black/30 border-white/5 text-white/25'}`}>
+          <span className={`h-1.5 w-1.5 rounded-full ${isPlaying ? 'bg-fuchsia-400 animate-pulse' : 'bg-white/30'}`} />
           <span>Real-time synced</span>
-          <span className={`h-1 w-1 rounded-full ${isPlaying ? 'bg-fuchsia-400 animate-pulse' : 'bg-white/30'}`} />
+          <span className={`h-1.5 w-1.5 rounded-full ${isPlaying ? 'bg-fuchsia-400 animate-pulse' : 'bg-white/30'}`} />
         </div>
       )}
     </div>
