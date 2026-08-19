@@ -222,16 +222,16 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
                       return (
                         <span
                           key={wIdx}
-                          className={`inline-block transition-all duration-150 ${
+                          className={`inline-block transition-all duration-500 ease-out ${
                             isActive
                               ? isWordActive
                                 ? isLight
-                                  ? 'text-black scale-[1.06] font-black drop-shadow-[0_0_12px_rgba(0,0,0,0.6)]'
-                                  : 'text-white scale-[1.06] font-black drop-shadow-[0_0_30px_rgba(255,255,255,1)] brightness-125'
+                                  ? 'text-black font-black drop-shadow-[0_0_12px_rgba(0,0,0,0.6)]'
+                                  : 'text-white font-black drop-shadow-[0_0_25px_rgba(255,255,255,1)] brightness-125'
                                 : isWordSung
                                 ? isLight
                                   ? 'text-black/90 font-black'
-                                  : 'text-white/95 font-black drop-shadow-[0_0_15px_rgba(255,255,255,0.7)]'
+                                  : 'text-white/95 font-black drop-shadow-[0_0_8px_rgba(255,255,255,0.4)]'
                                 : isLight
                                 ? 'text-black/35 font-bold'
                                 : 'text-white/35 font-bold'
