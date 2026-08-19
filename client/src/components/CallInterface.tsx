@@ -7,7 +7,7 @@ import { ChatSidebar } from './ChatSidebar';
 import { PlaylistSidebar } from './PlaylistSidebar';
 import { AudioMixerPanel } from './AudioMixerPanel';
 import { ReactionOverlay } from './ReactionOverlay';
-import { extractYouTubeId, isYouTubeUrl, extractSpotifyInfo, extractSoundCloudInfo, parseMediaUrl } from '../utils/mediaPlatform';
+import { extractYouTubeId, isYouTubeUrl, extractSpotifyInfo, extractSoundCloudInfo, isMonochromeUrl, parseMediaUrl } from '../utils/mediaPlatform';
 import {
   Mic,
   MicOff,
@@ -686,7 +686,19 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     }
 
     // ───────────────────────────────────────────
-    // Path B: Synchronized Direct MP3 / Audio Stream
+    // Path B: Web Widgets (Spotify, Monochrome, SoundCloud)
+    // ───────────────────────────────────────────
+    if (extractSpotifyInfo(trackUrl) || isMonochromeUrl(trackUrl) || extractSoundCloudInfo(trackUrl)) {
+      if (audio && !audio.paused) audio.pause();
+      if (ytPlayerRef.current && ytPlayerReadyRef.current) {
+        try { ytPlayerRef.current.pauseVideo(); } catch (_) {}
+      }
+      setShowYtVideo(true); // Automatically ensure widget is visible
+      return;
+    }
+
+    // ───────────────────────────────────────────
+    // Path C: Synchronized Direct MP3 / Audio Stream
     // ───────────────────────────────────────────
     if (ytPlayerRef.current && ytPlayerReadyRef.current) {
       try { ytPlayerRef.current.pauseVideo(); } catch (_) {}
@@ -1436,11 +1448,15 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             </div>
           )}
 
-          {/* Multi-Platform Player Overlay (YouTube, Spotify, SoundCloud, Web Audio) */}
+          {/* Multi-Platform Player Overlay (YouTube, Spotify, SoundCloud, Monochrome) */}
           {musicState.currentTrack && (
             <div
-              className={`absolute bottom-20 md:bottom-24 right-3 md:right-6 z-30 transition-all duration-300 rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-black ${
-                showYtVideo ? 'w-64 sm:w-80 md:w-96 aspect-video block' : 'w-1 h-1 opacity-0 pointer-events-none'
+              className={`absolute bottom-20 md:bottom-24 right-3 md:right-6 z-30 transition-all duration-300 rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-[#121212] ${
+                showYtVideo 
+                  ? extractSpotifyInfo(musicState.currentTrack.url) || isMonochromeUrl(musicState.currentTrack.url)
+                    ? 'w-72 sm:w-88 md:w-96 h-64 sm:h-72 block'
+                    : 'w-64 sm:w-80 md:w-96 aspect-video block'
+                  : 'w-1 h-1 opacity-0 pointer-events-none'
               }`}
             >
               {/* YouTube Container */}
@@ -1462,6 +1478,19 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                 />
               )}
 
+              {/* Monochrome Web Lossless Player */}
+              {isMonochromeUrl(musicState.currentTrack.url) && (
+                <iframe
+                  src={musicState.currentTrack.url.startsWith('http') ? musicState.currentTrack.url : `https://${musicState.currentTrack.url}`}
+                  width="100%"
+                  height="100%"
+                  frameBorder="0"
+                  allow="autoplay; encrypted-media; fullscreen"
+                  loading="lazy"
+                  className="w-full h-full rounded-2xl bg-[#121212]"
+                />
+              )}
+
               {/* SoundCloud Embed Widget */}
               {extractSoundCloudInfo(musicState.currentTrack.url) && (
                 <iframe
@@ -1477,7 +1506,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
               <button
                 onClick={() => setShowYtVideo(!showYtVideo)}
-                className="absolute top-1.5 right-1.5 md:top-2 md:right-2 bg-black/70 hover:bg-black/90 text-white/80 hover:text-white p-1 rounded-full text-xs z-40 backdrop-blur-sm border border-white/10"
+                className="absolute top-1.5 right-1.5 md:top-2 md:right-2 bg-black/80 hover:bg-black text-white/80 hover:text-white p-1 rounded-full text-xs z-40 backdrop-blur-sm border border-white/10"
                 title={showYtVideo ? "Hide Media Player" : "Show Media Player"}
               >
                 {showYtVideo ? <EyeOff size={13} /> : <Eye size={13} />}

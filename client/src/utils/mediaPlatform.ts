@@ -3,7 +3,7 @@
  * Supports: YouTube, YouTube Music, Spotify, SoundCloud, Monochrome / FLAC Lossless streams, Direct Audio Streams
  */
 
-export type PlatformType = 'youtube' | 'spotify' | 'soundcloud' | 'direct_audio' | 'web_stream';
+export type PlatformType = 'youtube' | 'spotify' | 'soundcloud' | 'monochrome' | 'direct_audio' | 'web_stream';
 
 export interface ParsedMedia {
   platform: PlatformType;
@@ -49,6 +49,11 @@ export function extractSoundCloudInfo(url: string): { embedUrl: string } | null 
   return null;
 }
 
+export function isMonochromeUrl(url: string): boolean {
+  if (!url) return false;
+  return url.toLowerCase().includes('monochrome.tf');
+}
+
 export function isDirectAudioUrl(url: string): boolean {
   if (!url) return false;
   const clean = url.split('?')[0].toLowerCase();
@@ -91,12 +96,22 @@ export function parseMediaUrl(url: string): ParsedMedia {
     };
   }
 
-  // 4. Direct Audio (Lossless / FLAC / MP3 / Monochrome stream)
-  if (isDirectAudioUrl(trimmed) || trimmed.includes('archive.org') || trimmed.includes('monochrome.tf') || trimmed.includes('stream')) {
+  // 4. Monochrome Web Lossless Player
+  if (isMonochromeUrl(trimmed)) {
+    return {
+      platform: 'monochrome',
+      embedUrl: trimmed.startsWith('http') ? trimmed : `https://${trimmed}`,
+      originalUrl: trimmed,
+      titleSuggestion: 'Monochrome Lossless Stream'
+    };
+  }
+
+  // 5. Direct Audio (Lossless / FLAC / MP3 / WAV stream)
+  if (isDirectAudioUrl(trimmed) || trimmed.includes('archive.org') || trimmed.includes('.mp3') || trimmed.includes('.flac')) {
     return {
       platform: 'direct_audio',
       originalUrl: trimmed,
-      titleSuggestion: 'Lossless Audio / Web Stream'
+      titleSuggestion: 'Lossless Audio Stream'
     };
   }
 
