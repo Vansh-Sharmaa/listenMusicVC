@@ -49,49 +49,13 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
   // Curated list of popular hits & live online music streams
   const onlinePresetTracks: MusicTrack[] = [
     {
-      id: 'yt-desi-kalakaar',
-      title: 'Desi Kalakaar',
-      artist: 'Yo Yo Honey Singh',
-      url: 'https://www.youtube.com/watch?v=KhnVcACZFek',
-      duration: 253,
+      id: 'yt-the-weeknd-starboy',
+      title: 'Starboy',
+      artist: 'The Weeknd ft. Daft Punk',
+      url: 'https://www.youtube.com/watch?v=34Na4j8AVgA',
+      duration: 230,
       isRoyaltyFree: false,
-      thumbnail: 'https://img.youtube.com/vi/KhnVcACZFek/hqdefault.jpg'
-    },
-    {
-      id: 'yt-blue-eyes',
-      title: 'Blue Eyes',
-      artist: 'Yo Yo Honey Singh',
-      url: 'https://www.youtube.com/watch?v=NbyHNASFi6U',
-      duration: 220,
-      isRoyaltyFree: false,
-      thumbnail: 'https://img.youtube.com/vi/NbyHNASFi6U/hqdefault.jpg'
-    },
-    {
-      id: 'yt-brown-rang',
-      title: 'Brown Rang',
-      artist: 'Yo Yo Honey Singh',
-      url: 'https://www.youtube.com/watch?v=kYx4jN5k2m8',
-      duration: 180,
-      isRoyaltyFree: false,
-      thumbnail: 'https://img.youtube.com/vi/kYx4jN5k2m8/hqdefault.jpg'
-    },
-    {
-      id: 'yt-dope-shope',
-      title: 'Dope Shope',
-      artist: 'Yo Yo Honey Singh, Deep Money',
-      url: 'https://www.youtube.com/watch?v=RbaYp1Gf-t8',
-      duration: 190,
-      isRoyaltyFree: false,
-      thumbnail: 'https://img.youtube.com/vi/RbaYp1Gf-t8/hqdefault.jpg'
-    },
-    {
-      id: 'yt-chase-atlantic-slide',
-      title: 'SLIDE',
-      artist: 'Chase Atlantic',
-      url: 'https://www.youtube.com/watch?v=tOVIeLZtxDc',
-      duration: 210,
-      isRoyaltyFree: false,
-      thumbnail: 'https://img.youtube.com/vi/tOVIeLZtxDc/hqdefault.jpg'
+      thumbnail: 'https://img.youtube.com/vi/34Na4j8AVgA/hqdefault.jpg'
     },
     {
       id: 'yt-the-weeknd-blinding',
@@ -103,6 +67,15 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
       thumbnail: 'https://img.youtube.com/vi/4NRXx6U8ABQ/hqdefault.jpg'
     },
     {
+      id: 'yt-chase-atlantic-slide',
+      title: 'SLIDE',
+      artist: 'Chase Atlantic',
+      url: 'https://www.youtube.com/watch?v=tOVIeLZtxDc',
+      duration: 210,
+      isRoyaltyFree: false,
+      thumbnail: 'https://img.youtube.com/vi/tOVIeLZtxDc/hqdefault.jpg'
+    },
+    {
       id: 'yt-drake-massive',
       title: 'Massive',
       artist: 'Drake',
@@ -110,6 +83,15 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
       duration: 336,
       isRoyaltyFree: false,
       thumbnail: 'https://img.youtube.com/vi/ay1l_u6vltY/hqdefault.jpg'
+    },
+    {
+      id: 'yt-lofi-girl',
+      title: 'Lofi Hip Hop / Study Beats',
+      artist: 'Lofi Girl Live',
+      url: 'https://www.youtube.com/watch?v=jfKfPfyJRdk',
+      duration: 14400,
+      isRoyaltyFree: true,
+      thumbnail: 'https://img.youtube.com/vi/jfKfPfyJRdk/hqdefault.jpg'
     },
     {
       id: 'yt-future-weeknd',

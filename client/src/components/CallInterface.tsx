@@ -32,7 +32,9 @@ import {
   Minimize2,
   ExternalLink,
   Sparkles,
-  Disc
+  Disc,
+  SkipForward,
+  SkipBack
 } from 'lucide-react';
 
 interface CallInterfaceProps {
@@ -1332,6 +1334,73 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   // Render
   // ─────────────────────────────────────────────────────────────
 
+  // Standard Track Playlist for Skip Next / Prev
+  const standardPlaylist = [
+    {
+      id: 'yt-the-weeknd-starboy',
+      title: 'Starboy',
+      artist: 'The Weeknd ft. Daft Punk',
+      url: 'https://www.youtube.com/watch?v=34Na4j8AVgA',
+      duration: 230,
+      isRoyaltyFree: false,
+      thumbnail: 'https://img.youtube.com/vi/34Na4j8AVgA/hqdefault.jpg'
+    },
+    {
+      id: 'yt-the-weeknd-blinding',
+      title: 'Blinding Lights',
+      artist: 'The Weeknd',
+      url: 'https://www.youtube.com/watch?v=4NRXx6U8ABQ',
+      duration: 200,
+      isRoyaltyFree: false,
+      thumbnail: 'https://img.youtube.com/vi/4NRXx6U8ABQ/hqdefault.jpg'
+    },
+    {
+      id: 'yt-chase-atlantic-slide',
+      title: 'SLIDE',
+      artist: 'Chase Atlantic',
+      url: 'https://www.youtube.com/watch?v=tOVIeLZtxDc',
+      duration: 210,
+      isRoyaltyFree: false,
+      thumbnail: 'https://img.youtube.com/vi/tOVIeLZtxDc/hqdefault.jpg'
+    },
+    {
+      id: 'yt-drake-massive',
+      title: 'Massive',
+      artist: 'Drake',
+      url: 'https://www.youtube.com/watch?v=ay1l_u6vltY',
+      duration: 336,
+      isRoyaltyFree: false,
+      thumbnail: 'https://img.youtube.com/vi/ay1l_u6vltY/hqdefault.jpg'
+    },
+    {
+      id: 'yt-lofi-girl',
+      title: 'Lofi Hip Hop / Study Beats',
+      artist: 'Lofi Girl Live',
+      url: 'https://www.youtube.com/watch?v=jfKfPfyJRdk',
+      duration: 14400,
+      isRoyaltyFree: true,
+      thumbnail: 'https://img.youtube.com/vi/jfKfPfyJRdk/hqdefault.jpg'
+    }
+  ];
+
+  const handleSkipNext = () => {
+    const currentIndex = standardPlaylist.findIndex(t => t.id === musicState.currentTrackId);
+    const nextIndex = (currentIndex + 1) % standardPlaylist.length;
+    const nextTrack = standardPlaylist[nextIndex];
+    if (nextTrack) {
+      sendMusicAction('change', nextTrack.id, 0, nextTrack);
+    }
+  };
+
+  const handleSkipPrev = () => {
+    const currentIndex = standardPlaylist.findIndex(t => t.id === musicState.currentTrackId);
+    const prevIndex = (currentIndex - 1 + standardPlaylist.length) % standardPlaylist.length;
+    const prevTrack = standardPlaylist[prevIndex];
+    if (prevTrack) {
+      sendMusicAction('change', prevTrack.id, 0, prevTrack);
+    }
+  };
+
   return (
     <div className="flex flex-col h-[100dvh] bg-[#09090b] overflow-hidden text-white font-sans select-none">
       {/* Top Navigation Bar */}
@@ -1723,6 +1792,14 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <button
+                            onClick={handleSkipPrev}
+                            className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-xl text-xs transition-all active:scale-95 border border-white/15"
+                            title="Previous Track"
+                          >
+                            <SkipBack size={14} />
+                          </button>
+
+                          <button
                             onClick={() => {
                               let currentPos = musicState.lastPosition || 0;
                               if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
@@ -1741,6 +1818,14 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                           >
                             {musicState.isPlaying ? <Pause size={14} fill="white" /> : <Play size={14} fill="white" />}
                             <span>{musicState.isPlaying ? 'Pause for Room' : 'Play for Room'}</span>
+                          </button>
+
+                          <button
+                            onClick={handleSkipNext}
+                            className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-xl text-xs transition-all active:scale-95 border border-white/15"
+                            title="Next Track"
+                          >
+                            <SkipForward size={14} />
                           </button>
                         </div>
 
@@ -1818,28 +1903,15 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1.5 flex-shrink-0">
+                <div className="flex items-center gap-1 flex-shrink-0">
                   <button
-                    onClick={() => setIsPlayerExpanded(!isPlayerExpanded)}
+                    onClick={handleSkipPrev}
                     className="p-1.5 rounded-lg text-xs bg-white/5 hover:bg-white/15 border border-white/10 text-white/80 hover:text-white transition-all"
-                    title={isPlayerExpanded ? "Minimize Theater View" : "Expand Center Stage"}
+                    title="Previous Track"
                   >
-                    {isPlayerExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                    <SkipBack size={13} />
                   </button>
 
-                  {isYouTubeUrl(musicState.currentTrack.url) && (
-                    <button
-                      onClick={() => setShowYtVideo(!showYtVideo)}
-                      className={`p-1.5 rounded-lg text-xs transition-all border ${
-                        showYtVideo 
-                          ? 'bg-fuchsia-600/30 border-fuchsia-500/40 text-fuchsia-200' 
-                          : 'bg-white/5 border-white/10 text-white/60 hover:text-white'
-                      }`}
-                      title={showYtVideo ? "Hide YouTube Video" : "Show YouTube Video"}
-                    >
-                      {showYtVideo ? <Eye size={13} /> : <EyeOff size={13} />}
-                    </button>
-                  )}
                   <button
                     onClick={() => {
                       let currentPos = musicState.lastPosition || 0;
@@ -1858,6 +1930,22 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                     className="bg-fuchsia-600 hover:bg-fuchsia-500 p-1.5 rounded-xl text-white transition-all active:scale-95 shadow-md shadow-fuchsia-950/40"
                   >
                     {musicState.isPlaying ? <Pause size={14} fill="white" /> : <Play size={14} fill="white" />}
+                  </button>
+
+                  <button
+                    onClick={handleSkipNext}
+                    className="p-1.5 rounded-lg text-xs bg-white/5 hover:bg-white/15 border border-white/10 text-white/80 hover:text-white transition-all"
+                    title="Next Track"
+                  >
+                    <SkipForward size={13} />
+                  </button>
+
+                  <button
+                    onClick={() => setIsPlayerExpanded(!isPlayerExpanded)}
+                    className="p-1.5 rounded-lg text-xs bg-white/5 hover:bg-white/15 border border-white/10 text-white/80 hover:text-white transition-all ml-1"
+                    title={isPlayerExpanded ? "Minimize Theater View" : "Expand Center Stage"}
+                  >
+                    {isPlayerExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
                   </button>
                 </div>
               </div>
