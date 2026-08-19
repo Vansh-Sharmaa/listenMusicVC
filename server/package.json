@@ -11,6 +11,7 @@
     "prisma:migrate": "prisma migrate dev"
   },
   "dependencies": {
+    "@distube/ytsr": "^2.0.4",
     "@prisma/client": "^5.10.2",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
@@ -21,7 +22,8 @@
     "ioredis": "^5.3.2",
     "livekit-server-sdk": "^2.1.2",
     "socket.io": "^4.7.4",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "ytsr": "^3.8.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.0",

@@ -4,6 +4,7 @@ import { AccessToken } from 'livekit-server-sdk';
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
+import ytsr from '@distube/ytsr';
 
 export const apiRouter = Router();
 
@@ -162,6 +163,53 @@ apiRouter.get('/music/search', async (req: Request, res: Response) => {
     return res.json([]);
   }
 
+  const results: Array<{
+    id: string;
+    title: string;
+    artist: string;
+    url: string;
+    duration: number;
+    thumbnail: string;
+    isRoyaltyFree: boolean;
+  }> = [];
+
+  // --- PRIMARY: @distube/ytsr (no API key, returns real YouTube videos) ---
+  try {
+    const searchResults = await ytsr(query + ' song', { limit: 20 });
+    for (const item of searchResults.items) {
+      if (item.type !== 'video') continue;
+      const video = item as any;
+      if (!video.id) continue;
+
+      // Parse duration string "MM:SS" or "HH:MM:SS"
+      let durationSec = 210;
+      if (video.duration) {
+        const parts = String(video.duration).split(':').map(Number);
+        if (parts.length === 2) durationSec = parts[0] * 60 + parts[1];
+        else if (parts.length === 3) durationSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
+      }
+
+      results.push({
+        id: `yt-${video.id}`,
+        title: video.name || video.title || 'Unknown Song',
+        artist: video.author?.name || 'YouTube Artist',
+        url: `https://www.youtube.com/watch?v=${video.id}`,
+        duration: durationSec,
+        thumbnail: video.thumbnail?.url || `https://img.youtube.com/vi/${video.id}/hqdefault.jpg`,
+        isRoyaltyFree: false
+      });
+
+      if (results.length >= 15) break;
+    }
+    if (results.length > 0) {
+      console.log(`[Music Search] ytsr returned ${results.length} results for "${query}"`);
+      return res.json(results);
+    }
+  } catch (ytsrErr) {
+    console.warn('[Music Search] @distube/ytsr failed, falling back to scrape:', ytsrErr);
+  }
+
+  // --- FALLBACK 1: HTML Scrape YouTube results page ---
   try {
     const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query + ' song')}`;
     const response = await fetch(searchUrl, {
@@ -170,17 +218,7 @@ apiRouter.get('/music/search', async (req: Request, res: Response) => {
         'Accept-Language': 'en-US,en;q=0.9'
       }
     });
-
     const html = await response.text();
-    const results: Array<{
-      id: string;
-      title: string;
-      artist: string;
-      url: string;
-      duration: number;
-      thumbnail: string;
-      isRoyaltyFree: boolean;
-    }> = [];
 
     // Parse ytInitialData from YouTube response
     const jsonMatch = html.match(/ytInitialData\s*=\s*({.+?});<\/script>/s) ||
@@ -190,7 +228,6 @@ apiRouter.get('/music/search', async (req: Request, res: Response) => {
       try {
         const data = JSON.parse(jsonMatch[1]);
         const sectionContents = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents;
-        
         if (Array.isArray(sectionContents)) {
           for (const section of sectionContents) {
             const items = section?.itemSectionRenderer?.contents;
@@ -201,26 +238,18 @@ apiRouter.get('/music/search', async (req: Request, res: Response) => {
                   const title = video.title?.runs?.[0]?.text || video.title?.simpleText || 'Unknown Song';
                   const artist = video.ownerText?.runs?.[0]?.text || video.shortBylineText?.runs?.[0]?.text || 'YouTube Artist';
                   const durationStr = video.lengthText?.simpleText || '3:30';
-                  
-                  // Parse duration "MM:SS" or "HH:MM:SS" into seconds
                   const parts = durationStr.split(':').map(Number);
                   let durationSec = 210;
-                  if (parts.length === 2) {
-                    durationSec = parts[0] * 60 + parts[1];
-                  } else if (parts.length === 3) {
-                    durationSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
-                  }
-
+                  if (parts.length === 2) durationSec = parts[0] * 60 + parts[1];
+                  else if (parts.length === 3) durationSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
                   results.push({
                     id: `yt-${video.videoId}`,
-                    title,
-                    artist,
+                    title, artist,
                     url: `https://www.youtube.com/watch?v=${video.videoId}`,
                     duration: durationSec,
                     thumbnail: `https://img.youtube.com/vi/${video.videoId}/hqdefault.jpg`,
                     isRoyaltyFree: false
                   });
-
                   if (results.length >= 10) break;
                 }
               }
@@ -229,11 +258,11 @@ apiRouter.get('/music/search', async (req: Request, res: Response) => {
           }
         }
       } catch (parseErr) {
-        console.warn('[Music Search] JSON parse failed, falling back to regex:', parseErr);
+        console.warn('[Music Search] JSON parse failed, trying regex fallback');
       }
     }
 
-    // Regex fallback if initialData JSON format shifted
+    // Regex fallback
     if (results.length === 0) {
       const videoRegex = /"videoId":"([a-zA-Z0-9_-]{11})","thumbnail":.+?"title":{"runs":\[{"text":"(.+?)"}\]}.+?"longBylineText":{"runs":\[{"text":"(.+?)"/g;
       let match;
@@ -241,51 +270,41 @@ apiRouter.get('/music/search', async (req: Request, res: Response) => {
         const videoId = match[1];
         const title = match[2].replace(/\\u0026/g, '&');
         const artist = match[3].replace(/\\u0026/g, '&');
-
         if (!results.some(r => r.id === `yt-${videoId}`)) {
+          results.push({ id: `yt-${videoId}`, title, artist, url: `https://www.youtube.com/watch?v=${videoId}`, duration: 210, thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`, isRoyaltyFree: false });
+        }
+      }
+    }
+
+    if (results.length > 0) return res.json(results);
+  } catch (scrapeErr) {
+    console.warn('[Music Search] HTML scrape failed:', scrapeErr);
+  }
+
+  // --- FALLBACK 2: iTunes Search API (reliable, global) ---
+  try {
+    const itunesRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=15`);
+    if (itunesRes.ok) {
+      const itunesData = (await itunesRes.json()) as any;
+      if (itunesData && Array.isArray(itunesData.results)) {
+        for (const item of itunesData.results) {
           results.push({
-            id: `yt-${videoId}`,
-            title,
-            artist,
-            url: `https://www.youtube.com/watch?v=${videoId}`,
-            duration: 210,
-            thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
-            isRoyaltyFree: false
+            id: `itunes-${item.trackId}`,
+            title: item.trackName || 'Song',
+            artist: item.artistName || 'Artist',
+            url: item.previewUrl || `https://www.youtube.com/results?search_query=${encodeURIComponent(item.artistName + ' ' + item.trackName)}`,
+            duration: Math.round((item.trackTimeMillis || 180000) / 1000),
+            thumbnail: (item.artworkUrl100 || '').replace('100x100bb', '600x600bb'),
+            isRoyaltyFree: true
           });
         }
       }
     }
-
-    // Tertiary Fallback: iTunes Search API (100% reliable on Datacenter IPs / Render with instant HQ previews)
-    if (results.length === 0) {
-      try {
-        const itunesRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=10`);
-        if (itunesRes.ok) {
-          const itunesData = (await itunesRes.json()) as any;
-          if (itunesData && Array.isArray(itunesData.results)) {
-            for (const item of itunesData.results) {
-              results.push({
-                id: `itunes-${item.trackId}`,
-                title: item.trackName || 'Song',
-                artist: item.artistName || 'Artist',
-                url: item.previewUrl || `https://www.youtube.com/results?search_query=${encodeURIComponent(item.artistName + ' ' + item.trackName)}`,
-                duration: Math.round((item.trackTimeMillis || 180000) / 1000),
-                thumbnail: (item.artworkUrl100 || '').replace('100x100bb', '600x600bb'),
-                isRoyaltyFree: true
-              });
-            }
-          }
-        }
-      } catch (itunesErr) {
-        console.warn('[Music Search] iTunes fallback failed:', itunesErr);
-      }
-    }
-
-    return res.json(results);
-  } catch (err) {
-    console.error('[Music Search] Exception:', err);
-    return res.status(500).json({ error: 'Search failed' });
+  } catch (itunesErr) {
+    console.warn('[Music Search] iTunes fallback failed:', itunesErr);
   }
+
+  return res.json(results);
 });
 
 // GET /api/lyrics - Fetch synchronized LRC lyrics (LRCLIB Integration)

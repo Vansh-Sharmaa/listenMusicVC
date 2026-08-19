@@ -3,7 +3,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useSocket } from '../context/SocketContext';
 import { useAudioMixer } from '../context/AudioMixerContext';
-import { Play, Pause, Music, Upload, Loader2, Plus, Volume2, Link as LinkIcon, Radio, Share2, Disc } from 'lucide-react';
+import { Play, Pause, Music, Upload, Loader2, Plus, Volume2, Link as LinkIcon, Radio, Share2, Disc, Zap, ExternalLink } from 'lucide-react';
+
 
 import { parseMediaUrl, extractYouTubeId, isYouTubeUrl, isSpotifyUrl, isMonochromeUrl, extractSpotifyInfo } from '../utils/mediaPlatform';
 
@@ -37,6 +38,15 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
   const [modalTab, setModalTab] = useState<'online' | 'upload'>('online');
   const [showAddModal, setShowAddModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Sidebar panel mode: 'youtube' | 'monochrome'
+  const [sidebarMode, setSidebarMode] = useState<'youtube' | 'monochrome'>('youtube');
+
+  // Monochrome.tf state
+  const [monoUrl, setMonoUrl] = useState('');
+  const [monoTitle, setMonoTitle] = useState('');
+  const [monoArtist, setMonoArtist] = useState('');
+  const [monoSubmitting, setMonoSubmitting] = useState(false);
 
   // Form states for online URL / YouTube
   const [onlineTitle, setOnlineTitle] = useState('');
@@ -431,7 +441,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
 
   return (
     <div className={`flex flex-col h-full border-l backdrop-blur-md w-80 ${isLight ? 'bg-white/40 border-black/5 text-black' : 'bg-black/40 border-white/10 text-white'}`}>
-      {/* Header */}
+      {/* Header with mode switcher */}
       <div className={`p-4 border-b flex justify-between items-center ${isLight ? 'border-black/5' : 'border-white/10'}`}>
         <div className="flex items-center gap-2">
           <Music size={20} className={isLight ? "text-fuchsia-600" : "text-fuchsia-400"} />
@@ -446,6 +456,189 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
         </button>
       </div>
 
+      {/* Mode Tabs: YouTube | Monochrome */}
+      <div className={`flex border-b ${isLight ? 'border-black/5' : 'border-white/10'}`}>
+        <button
+          onClick={() => setSidebarMode('youtube')}
+          className={`flex-1 py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 transition-all border-b-2 ${
+            sidebarMode === 'youtube'
+              ? 'border-red-500 text-red-400 bg-red-500/5'
+              : `border-transparent ${isLight ? 'text-black/40 hover:text-black' : 'text-white/40 hover:text-white'}`
+          }`}
+        >
+          <span>🔴</span> YouTube
+        </button>
+        <button
+          onClick={() => setSidebarMode('monochrome')}
+          className={`flex-1 py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 transition-all border-b-2 ${
+            sidebarMode === 'monochrome'
+              ? 'border-cyan-400 text-cyan-400 bg-cyan-400/5'
+              : `border-transparent ${isLight ? 'text-black/40 hover:text-black' : 'text-white/40 hover:text-white'}`
+          }`}
+        >
+          <Zap size={12} /> Monochrome Hi-Fi
+        </button>
+      </div>
+
+      {/* ======== MONOCHROME PANEL ======== */}
+      {sidebarMode === 'monochrome' && (
+        <div className="flex flex-col flex-1 overflow-hidden">
+          {/* Monochrome Banner */}
+          <div className={`p-3 border-b space-y-2 ${isLight ? 'bg-cyan-50/50 border-black/5' : 'bg-cyan-950/30 border-cyan-900/30'}`}>
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-cyan-500/20">
+                <Zap size={14} className="text-cyan-400" />
+              </div>
+              <div>
+                <p className={`text-xs font-bold ${isLight ? 'text-cyan-700' : 'text-cyan-300'}`}>Monochrome.tf — Lossless Hi-Fi</p>
+                <p className={`text-[10px] ${isLight ? 'text-black/50' : 'text-white/40'}`}>Both users hear the same stream in sync</p>
+              </div>
+            </div>
+
+            {/* How to get URL tip */}
+            <div className={`text-[10px] rounded-xl p-2.5 flex gap-2 ${isLight ? 'bg-black/5 text-black/60' : 'bg-white/5 text-white/50'}`}>
+              <span>💡</span>
+              <span>On Monochrome, open a track → right-click the audio player → <strong>Copy audio address</strong> → paste below</span>
+            </div>
+
+            {/* Monochrome URL input */}
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const url = monoUrl.trim();
+                if (!url) return;
+                setMonoSubmitting(true);
+                const newTrack = {
+                  id: `mono-${Date.now()}`,
+                  title: monoTitle.trim() || 'Monochrome Track',
+                  artist: monoArtist.trim() || 'Monochrome Hi-Fi',
+                  url,
+                  duration: 300,
+                  isRoyaltyFree: false,
+                  thumbnail: 'https://monochrome.tf/favicon.ico'
+                };
+                setTracks(prev => [newTrack, ...prev.filter(t => t.id !== newTrack.id)]);
+                handleTrackSelect(newTrack as any);
+                setMonoUrl('');
+                setMonoTitle('');
+                setMonoArtist('');
+                setMonoSubmitting(false);
+              }}
+              className="space-y-1.5"
+            >
+              <input
+                type="url"
+                value={monoUrl}
+                onChange={e => setMonoUrl(e.target.value)}
+                required
+                placeholder="Paste direct audio URL (.flac / .mp3 / stream)"
+                className={`w-full border rounded-xl px-2.5 py-1.5 text-[11px] font-mono focus:outline-none focus:border-cyan-400 transition-all ${
+                  isLight ? 'bg-black/5 border-black/10 text-black placeholder-black/30' : 'bg-white/5 border-white/15 text-white placeholder-white/30'
+                }`}
+              />
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={monoTitle}
+                  onChange={e => setMonoTitle(e.target.value)}
+                  placeholder="Track name (optional)"
+                  className={`flex-1 border rounded-xl px-2.5 py-1.5 text-[11px] focus:outline-none focus:border-cyan-400 transition-all ${
+                    isLight ? 'bg-black/5 border-black/10 text-black placeholder-black/30' : 'bg-white/5 border-white/15 text-white placeholder-white/30'
+                  }`}
+                />
+                <button
+                  type="submit"
+                  disabled={!monoUrl.trim() || monoSubmitting}
+                  className="bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-white text-[11px] px-3 py-1.5 rounded-xl font-bold transition-all active:scale-95 flex items-center gap-1 flex-shrink-0"
+                >
+                  {monoSubmitting ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} fill="white" />}
+                  Play
+                </button>
+              </div>
+            </form>
+
+            {/* Open Monochrome button */}
+            <a
+              href="https://monochrome.tf"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`w-full flex items-center justify-center gap-1.5 text-[10px] font-semibold py-1.5 rounded-xl transition-all ${
+                isLight ? 'bg-black/5 hover:bg-black/10 text-black/60' : 'bg-white/5 hover:bg-white/10 text-white/50'
+              }`}
+            >
+              <ExternalLink size={10} /> Open Monochrome.tf to find tracks
+            </a>
+          </div>
+
+          {/* Now Playing (Monochrome) */}
+          {activeTrack && isMonochromeUrl(activeTrack.url) && (
+            <div className={`p-3 border-b ${isLight ? 'bg-black/5 border-black/5' : 'bg-white/5 border-white/10'}`}>
+              <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 mb-2 ${isLight ? 'text-cyan-600' : 'text-cyan-400'}`}>
+                <Radio size={10} className="animate-pulse" /> Now Streaming Hi-Fi
+              </span>
+              <div className="flex items-center gap-2">
+                <div className="w-10 h-10 rounded-lg bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center flex-shrink-0">
+                  <Zap size={18} className="text-cyan-400" />
+                </div>
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-xs font-semibold truncate">{activeTrack.title}</span>
+                  <span className={`text-[10px] truncate ${isLight ? 'text-black/50' : 'text-white/40'}`}>{activeTrack.artist}</span>
+                </div>
+                <button
+                  onClick={handlePlayPause}
+                  className="bg-cyan-500 hover:bg-cyan-400 text-white rounded-full p-2 transition-all active:scale-95"
+                >
+                  {musicState.isPlaying ? <Pause size={14} fill="white" /> : <Play size={14} fill="white" />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Monochrome preset / recent tracks */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            <p className={`text-[10px] uppercase tracking-widest font-bold px-1 pb-1 ${isLight ? 'text-black/30' : 'text-white/30'}`}>Recent & Demo Tracks</p>
+            {tracks
+              .filter(t => isMonochromeUrl(t.url) || t.id.startsWith('mono-'))
+              .map(track => {
+                const isCurrent = track.id === musicState.currentTrackId;
+                return (
+                  <button
+                    key={track.id}
+                    onClick={() => handleTrackSelect(track)}
+                    className={`w-full text-left p-2.5 rounded-xl flex items-center gap-2.5 transition-all ${
+                      isCurrent
+                        ? 'bg-cyan-500/15 border border-cyan-500/30'
+                        : isLight ? 'bg-black/5 hover:bg-black/10 border border-transparent' : 'bg-white/5 hover:bg-white/10 border border-transparent'
+                    }`}
+                  >
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                      isCurrent ? 'bg-cyan-500/30' : isLight ? 'bg-black/10' : 'bg-white/10'
+                    }`}>
+                      <Zap size={14} className={isCurrent ? 'text-cyan-400' : isLight ? 'text-black/40' : 'text-white/40'} />
+                    </div>
+                    <div className="flex flex-col min-w-0 flex-1">
+                      <span className={`text-xs font-semibold truncate ${
+                        isCurrent ? (isLight ? 'text-cyan-700' : 'text-cyan-300') : ''
+                      }`}>{track.title}</span>
+                      <span className={`text-[10px] truncate ${isLight ? 'text-black/50' : 'text-white/40'}`}>{track.artist}</span>
+                    </div>
+                    {isCurrent && <Radio size={12} className="text-cyan-400 animate-pulse flex-shrink-0" />}
+                  </button>
+                );
+              })}
+            {tracks.filter(t => isMonochromeUrl(t.url) || t.id.startsWith('mono-')).length === 0 && (
+              <div className={`text-center py-8 text-xs ${isLight ? 'text-black/30' : 'text-white/30'}`}>
+                <Zap size={24} className="mx-auto mb-2 opacity-20" />
+                Paste a Monochrome.tf stream URL above to play lossless audio for everyone in the room
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ======== YOUTUBE PANEL (unchanged) ======== */}
+      {sidebarMode === 'youtube' && (
+        <>
       <div className={`p-3 border-b relative ${isLight ? 'bg-gradient-to-b from-fuchsia-100/50 to-white/50 border-black/5' : 'bg-gradient-to-b from-fuchsia-950/40 to-black/20 border-white/10'}`}>
         <form onSubmit={handleQuickPlay} className="space-y-2">
           <div className={`flex items-center justify-between text-[11px] font-semibold px-0.5 ${isLight ? 'text-fuchsia-700' : 'text-fuchsia-300'}`}>
@@ -617,85 +810,86 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
         ))}
       </div>
 
-      {/* Online Streams & Tracks List */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {loading ? (
-          <div className={`flex items-center justify-center py-10 text-xs ${isLight ? 'text-black/30' : 'text-white/30'}`}>
-            <Loader2 size={16} className="animate-spin mr-2" />
-            Loading music...
-          </div>
-        ) : (
-          tracks
-            .filter((t) => {
-              if (selectedCategory === 'all') return true;
-              if (selectedCategory === 'youtube') return isYouTubeUrl(t.url);
-              if (selectedCategory === 'spotify') return isSpotifyUrl(t.url);
-              if (selectedCategory === 'monochrome') return isMonochromeUrl(t.url) || t.url.includes('flac');
-              if (selectedCategory === 'lofi') return t.title.toLowerCase().includes('lofi') || t.isRoyaltyFree;
-              return true;
-            })
-            .map((track) => {
-              const isCurrent = track.id === musicState.currentTrackId;
-              const badge = isYouTubeUrl(track.url)
-                ? { label: 'YOUTUBE', color: 'bg-red-500/20 text-red-300 border-red-500/30' }
-                : isSpotifyUrl(track.url)
-                ? { label: 'SPOTIFY', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' }
-                : isMonochromeUrl(track.url)
-                ? { label: 'MONOCHROME', color: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' }
-                : { label: 'LOSSLESS', color: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30' };
-
-            return (
-              <div
-                key={track.id}
-                className={`w-full text-left p-2.5 rounded-xl flex items-center gap-3 group transition-all duration-300 ${
-                  isCurrent
-                    ? isLight
-                      ? 'bg-fuchsia-600/15 border border-fuchsia-500/30 text-black shadow-lg'
-                      : 'bg-fuchsia-600/25 border border-fuchsia-500/40 text-white shadow-lg'
-                    : isLight
-                      ? 'bg-transparent hover:bg-black/5 border border-transparent hover:border-black/10'
-                      : 'bg-transparent hover:bg-white/5 border border-transparent hover:border-white/10'
-                }`}
-              >
-                <button onClick={() => handleTrackSelect(track)} className="flex-1 flex items-center gap-3 min-w-0 text-left">
-                  {track.thumbnail ? (
-                    <img
-                      src={track.thumbnail}
-                      alt={track.title}
-                      className={`w-10 h-10 rounded-lg object-cover flex-shrink-0 border ${isLight ? 'border-black/10' : 'border-white/10'}`}
-                    />
-                  ) : (
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 border ${isLight ? 'bg-black/5 border-black/10 text-black/40 group-hover:text-fuchsia-600' : 'bg-white/5 border-white/10 text-white/40 group-hover:text-fuchsia-300'}`}>
-                      <Music size={16} />
-                    </div>
-                  )}
-                  <div className="flex flex-col min-w-0 flex-1">
-                    <span className={`text-xs font-semibold truncate ${isCurrent ? (isLight ? 'text-fuchsia-700 font-bold' : 'text-fuchsia-200 font-bold') : (isLight ? 'text-black' : 'text-white')}`}>
-                      {track.title}
-                    </span>
-                    <span className={`text-[11px] truncate ${isLight ? 'text-black/50 group-hover:text-black/80' : 'text-white/40 group-hover:text-white/60'}`}>
-                      {track.artist}
-                    </span>
-                  </div>
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase font-bold border ${badge.color}`}>
-                    {badge.label}
-                  </span>
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    sendMusicAction('queue-add', track.id, 0, track);
-                  }}
-                  className={`p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity active:scale-95 ${isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white'}`}
-                  title="Add to Queue"
-                >
-                  <Plus size={14} />
-                </button>
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {loading ? (
+              <div className={`flex items-center justify-center py-10 text-xs ${isLight ? 'text-black/30' : 'text-white/30'}`}>
+                <Loader2 size={16} className="animate-spin mr-2" />
+                Loading music...
               </div>
-            );
-          })
-        )}
-      </div>
+            ) : (
+              tracks
+                .filter((t) => {
+                  if (selectedCategory === 'all') return true;
+                  if (selectedCategory === 'youtube') return isYouTubeUrl(t.url);
+                  if (selectedCategory === 'spotify') return isSpotifyUrl(t.url);
+                  if (selectedCategory === 'monochrome') return isMonochromeUrl(t.url) || t.url.includes('flac');
+                  if (selectedCategory === 'lofi') return t.title.toLowerCase().includes('lofi') || t.isRoyaltyFree;
+                  return true;
+                })
+                .map((track) => {
+                  const isCurrent = track.id === musicState.currentTrackId;
+                  const badge = isYouTubeUrl(track.url)
+                    ? { label: 'YOUTUBE', color: 'bg-red-500/20 text-red-300 border-red-500/30' }
+                    : isSpotifyUrl(track.url)
+                    ? { label: 'SPOTIFY', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' }
+                    : isMonochromeUrl(track.url)
+                    ? { label: 'MONOCHROME', color: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' }
+                    : { label: 'LOSSLESS', color: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30' };
+
+                return (
+                  <div
+                    key={track.id}
+                    className={`w-full text-left p-2.5 rounded-xl flex items-center gap-3 group transition-all duration-300 ${
+                      isCurrent
+                        ? isLight
+                          ? 'bg-fuchsia-600/15 border border-fuchsia-500/30 text-black shadow-lg'
+                          : 'bg-fuchsia-600/25 border border-fuchsia-500/40 text-white shadow-lg'
+                        : isLight
+                          ? 'bg-transparent hover:bg-black/5 border border-transparent hover:border-black/10'
+                          : 'bg-transparent hover:bg-white/5 border border-transparent hover:border-white/10'
+                    }`}
+                  >
+                    <button onClick={() => handleTrackSelect(track)} className="flex-1 flex items-center gap-3 min-w-0 text-left">
+                      {track.thumbnail ? (
+                        <img
+                          src={track.thumbnail}
+                          alt={track.title}
+                          className={`w-10 h-10 rounded-lg object-cover flex-shrink-0 border ${isLight ? 'border-black/10' : 'border-white/10'}`}
+                        />
+                      ) : (
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 border ${isLight ? 'bg-black/5 border-black/10 text-black/40 group-hover:text-fuchsia-600' : 'bg-white/5 border-white/10 text-white/40 group-hover:text-fuchsia-300'}`}>
+                          <Music size={16} />
+                        </div>
+                      )}
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <span className={`text-xs font-semibold truncate ${isCurrent ? (isLight ? 'text-fuchsia-700 font-bold' : 'text-fuchsia-200 font-bold') : (isLight ? 'text-black' : 'text-white')}`}>
+                          {track.title}
+                        </span>
+                        <span className={`text-[11px] truncate ${isLight ? 'text-black/50 group-hover:text-black/80' : 'text-white/40 group-hover:text-white/60'}`}>
+                          {track.artist}
+                        </span>
+                      </div>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase font-bold border ${badge.color}`}>
+                        {badge.label}
+                      </span>
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        sendMusicAction('queue-add', track.id, 0, track);
+                      }}
+                      className={`p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity active:scale-95 ${isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white'}`}
+                      title="Add to Queue"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
 
       {/* Add Track / Online Link Modal Overlay */}
       {showAddModal && (
