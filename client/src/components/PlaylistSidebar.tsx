@@ -1070,7 +1070,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
                   if (selectedCategory === 'all') return true;
                   if (selectedCategory === 'youtube') return isYouTubeUrl(t.url);
                   if (selectedCategory === 'spotify') return isSpotifyUrl(t.url);
-                  if (selectedCategory === 'monochrome') return isMonochromeUrl(t.url) || t.url.includes('flac');
+                  if (selectedCategory === 'monochrome') return isMonochromeUrl(t.url) || t.url.includes('flac') || t.id.startsWith('mono');
                   if (selectedCategory === 'lofi') return t.title.toLowerCase().includes('lofi') || t.isRoyaltyFree;
                   return true;
                 })
@@ -1080,7 +1080,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
                     ? { label: 'YOUTUBE', color: 'bg-red-500/20 text-red-300 border-red-500/30' }
                     : isSpotifyUrl(track.url)
                     ? { label: 'SPOTIFY', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' }
-                    : isMonochromeUrl(track.url)
+                    : (isMonochromeUrl(track.url) || track.id.startsWith('mono'))
                     ? { label: 'MONOCHROME', color: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' }
                     : { label: 'LOSSLESS', color: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30' };
 

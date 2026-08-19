@@ -859,6 +859,10 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
         'online-1': 'https://ia802802.us.archive.org/5/items/lofi-study-112191/lofi-study-112191.mp3',
         'online-2': 'https://ia800905.us.archive.org/19/items/FREE_background_music_loops/chill_groove.mp3',
         'online-3': 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3',
+        'monochrome-preset-1': 'https://ia800905.us.archive.org/19/items/FREE_background_music_loops/chill_groove.mp3',
+        'monochrome-preset-2': 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3',
+        'monochrome-preset-3': 'https://ia802802.us.archive.org/5/items/lofi-study-112191/lofi-study-112191.mp3',
+        'monochrome-preset-4': 'https://ia800905.us.archive.org/19/items/FREE_background_music_loops/chill_groove.mp3'
       };
       trackUrl = presetList[musicState.currentTrackId] || '';
     }
