@@ -856,7 +856,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             audio: {
               echoCancellation: true,
               noiseSuppression: true,
-              autoGainControl: true
+              autoGainControl: false
             }
           });
         } catch (e1) {
