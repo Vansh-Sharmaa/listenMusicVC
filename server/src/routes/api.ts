@@ -288,3 +288,74 @@ apiRouter.get('/music/search', async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/lyrics - Fetch synchronized LRC lyrics (LRCLIB Integration)
+apiRouter.get('/lyrics', async (req: Request, res: Response) => {
+  const trackName = (req.query.title as string || '').trim();
+  const artistName = (req.query.artist as string || '').trim();
+  const duration = req.query.duration ? parseInt(req.query.duration as string, 10) : undefined;
+
+  if (!trackName) {
+    return res.status(400).json({ error: 'Missing title parameter' });
+  }
+
+  // Clean track title (strip "(Official Video)", "feat. ...", "[4K]", etc.)
+  const cleanTitle = trackName
+    .replace(/\s*[\(\[](official\s*(music\s*)?video|video|audio|lyrics?|hd|4k|remix|feat\.?|ft\.?).*?[\)\]]/gi, '')
+    .trim();
+  const cleanArtist = artistName
+    .replace(/\s*-\s*topic/gi, '')
+    .replace(/\s*vevo/gi, '')
+    .trim();
+
+  try {
+    // 1. Try exact match from LRCLIB
+    const queryParams = new URLSearchParams({
+      track_name: cleanTitle,
+      ...(cleanArtist ? { artist_name: cleanArtist } : {}),
+      ...(duration ? { duration: duration.toString() } : {})
+    });
+
+    let lrcRes = await fetch(`https://lrclib.net/api/get?${queryParams.toString()}`, {
+      headers: { 'User-Agent': 'ListenMusicVC/1.0 (https://listen-music-vc.vercel.app)' }
+    });
+
+    if (lrcRes.ok) {
+      const data = await lrcRes.json();
+      return res.json({
+        id: data.id,
+        trackName: data.trackName,
+        artistName: data.artistName,
+        plainLyrics: data.plainLyrics,
+        syncedLyrics: data.syncedLyrics,
+        instrumental: data.instrumental
+      });
+    }
+
+    // 2. Fallback: Search LRCLIB
+    const searchRes = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(`${cleanArtist} ${cleanTitle}`.trim())}`, {
+      headers: { 'User-Agent': 'ListenMusicVC/1.0 (https://listen-music-vc.vercel.app)' }
+    });
+
+    if (searchRes.ok) {
+      const results = await searchRes.json();
+      if (Array.isArray(results) && results.length > 0) {
+        // Find best match with synced lyrics
+        const best = results.find((r: any) => r.syncedLyrics) || results[0];
+        return res.json({
+          id: best.id,
+          trackName: best.trackName,
+          artistName: best.artistName,
+          plainLyrics: best.plainLyrics,
+          syncedLyrics: best.syncedLyrics,
+          instrumental: best.instrumental
+        });
+      }
+    }
+
+    return res.status(404).json({ error: 'Lyrics not found' });
+  } catch (err) {
+    console.error('[Lyrics API] Fetch error:', err);
+    return res.status(500).json({ error: 'Failed to fetch lyrics' });
+  }
+});
+

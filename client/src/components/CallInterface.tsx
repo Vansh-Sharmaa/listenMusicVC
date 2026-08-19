@@ -36,8 +36,11 @@ import {
   SkipForward,
   SkipBack,
   Sun,
-  Moon
+  Moon,
+  Mic2
 } from 'lucide-react';
+import { LyricsView } from './LyricsView';
+import { extractPaletteFromImage, SongColorPalette } from '../utils/colorExtractor';
 
 interface CallInterfaceProps {
   roomId: string;
@@ -183,9 +186,21 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   const [isScreenSharing, setIsScreenSharing] = useState(false);
 
   // Sidebar toggles
-  const [activeSidebar, setActiveSidebar] = useState<'chat' | 'music' | 'mixer' | null>('music');
+  const [activeSidebar, setActiveSidebar] = useState<'chat' | 'music' | 'mixer' | 'lyrics' | null>('music');
   const [showReactionMenu, setShowReactionMenu] = useState(false);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
+  const [songPalette, setSongPalette] = useState<SongColorPalette | null>(null);
+
+  // Dynamic Apple Music fluid color extraction from album art
+  useEffect(() => {
+    if (musicState.currentTrack?.thumbnail) {
+      extractPaletteFromImage(musicState.currentTrack.thumbnail).then(palette => {
+        setSongPalette(palette);
+      });
+    } else {
+      setSongPalette(null);
+    }
+  }, [musicState.currentTrack?.thumbnail]);
 
   // Mock speaking state (solo testing utility)
   const [mockSpeakingUser, setMockSpeakingUser] = useState<string | null>(null);
@@ -1467,18 +1482,29 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
   return (
     <div className={`flex flex-col h-[100dvh] overflow-hidden font-sans select-none relative ${isLight ? 'bg-white text-black' : 'bg-black text-white'}`}>
-      {/* Dynamic Ambient Blur Background */}
+      {/* Dynamic Apple Music Fluid Ambient Mesh Gradient */}
+      <div 
+        className="absolute inset-0 z-0 transition-all duration-[2000ms] ease-in-out pointer-events-none opacity-90"
+        style={{
+          background: songPalette
+            ? isLight
+              ? `radial-gradient(circle at 15% 25%, ${songPalette.primary}, transparent 55%), radial-gradient(circle at 85% 75%, ${songPalette.secondary}, transparent 55%), radial-gradient(circle at 50% 50%, ${songPalette.lightMuted}, transparent 80%)`
+              : `radial-gradient(circle at 15% 25%, ${songPalette.primary}, transparent 65%), radial-gradient(circle at 85% 75%, ${songPalette.secondary}, transparent 65%), radial-gradient(circle at 50% 50%, ${songPalette.darkMuted}, transparent 85%)`
+            : undefined
+        }}
+      />
+      {/* Dynamic Ambient Blur Texture Layer */}
       {musicState.currentTrack?.thumbnail && (
         <div 
-          className={`absolute inset-0 z-0 bg-cover bg-center transition-all duration-[2000ms] ease-in-out ${isLight ? 'opacity-80' : 'opacity-60'}`}
+          className={`absolute inset-0 z-0 bg-cover bg-center transition-all duration-[2000ms] ease-in-out ${isLight ? 'opacity-70 mix-blend-multiply' : 'opacity-60 mix-blend-screen'}`}
           style={{ 
             backgroundImage: `url(${musicState.currentTrack.thumbnail})`,
-            filter: isLight ? 'blur(100px) saturate(150%) brightness(1.2)' : 'blur(100px) saturate(120%) brightness(0.6)',
-            transform: 'scale(1.1)'
+            filter: isLight ? 'blur(120px) saturate(160%) brightness(1.1)' : 'blur(120px) saturate(140%) brightness(0.7)',
+            transform: 'scale(1.15)'
           }} 
         />
       )}
-      <div className={`absolute inset-0 z-0 pointer-events-none ${isLight ? 'bg-white/40' : 'bg-gradient-to-b from-black/40 to-black/80'}`} />
+      <div className={`absolute inset-0 z-0 pointer-events-none ${isLight ? 'bg-white/30' : 'bg-gradient-to-b from-black/40 to-black/80'}`} />
 
       {/* Top Navigation Bar */}
       <div className={`h-12 md:h-14 border-b backdrop-blur-xl px-3 md:px-6 flex justify-between items-center z-20 flex-shrink-0 relative ${isLight ? 'bg-white/40 border-black/5' : 'bg-black/20 border-white/5'}`}>
@@ -2029,6 +2055,20 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                   </button>
 
                   <button
+                    onClick={() => setActiveSidebar(activeSidebar === 'lyrics' ? null : 'lyrics')}
+                    className={`p-1.5 rounded-lg text-xs border transition-all ${
+                      activeSidebar === 'lyrics'
+                        ? 'bg-fuchsia-600 text-white border-fuchsia-500 shadow-md shadow-fuchsia-950/40'
+                        : isLight
+                        ? 'bg-black/5 hover:bg-black/10 text-black/80 hover:text-black border-black/10'
+                        : 'bg-white/5 hover:bg-white/15 text-white/80 hover:text-white border-white/10'
+                    }`}
+                    title="Live Synchronized Lyrics"
+                  >
+                    <Mic2 size={13} />
+                  </button>
+
+                  <button
                     onClick={() => setIsPlayerExpanded(!isPlayerExpanded)}
                     className="p-1.5 rounded-lg text-xs bg-white/5 hover:bg-white/15 border border-white/10 text-white/80 hover:text-white transition-all ml-1"
                     title={isPlayerExpanded ? "Minimize Theater View" : "Expand Center Stage"}
@@ -2085,16 +2125,19 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
               <Smile size={18} />
             </button>
             <span className={`w-[1px] h-5 mx-0.5 md:mx-1 ${isLight ? 'bg-black/10' : 'bg-white/10'}`} />
-            <button onClick={() => setActiveSidebar(activeSidebar === 'mixer' ? null : 'mixer')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'mixer' ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`}>
+            <button onClick={() => setActiveSidebar(activeSidebar === 'mixer' ? null : 'mixer')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'mixer' ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`} title="Volume Mixer">
               <Sliders size={18} />
             </button>
-            <button onClick={() => setActiveSidebar(activeSidebar === 'music' ? null : 'music')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'music' ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`}>
+            <button onClick={() => setActiveSidebar(activeSidebar === 'music' ? null : 'music')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'music' ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`} title="Music Library">
               <Music size={18} />
             </button>
-            <button onClick={() => setActiveSidebar(activeSidebar === 'chat' ? null : 'chat')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'chat' ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`}>
+            <button onClick={() => setActiveSidebar(activeSidebar === 'lyrics' ? null : 'lyrics')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'lyrics' ? 'bg-fuchsia-600 text-white shadow-lg shadow-fuchsia-950/40' : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`} title="Live Apple Lyrics">
+              <Mic2 size={18} />
+            </button>
+            <button onClick={() => setActiveSidebar(activeSidebar === 'chat' ? null : 'chat')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'chat' ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`} title="Chat">
               <MessageSquare size={18} />
             </button>
-            <button onClick={handleLeaveCall} className="p-2.5 md:p-3.5 rounded-2xl bg-red-500 hover:bg-red-400 text-white transition-all active:scale-90 duration-300">
+            <button onClick={handleLeaveCall} className="p-2.5 md:p-3.5 rounded-2xl bg-red-500 hover:bg-red-400 text-white transition-all active:scale-90 duration-300" title="Leave Room">
               <PhoneOff size={18} />
             </button>
           </div>
@@ -2102,7 +2145,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
         {/* Sidebars (Mobile modal bottom-sheet / overlay on iPhone, side-docked on desktop) */}
         {activeSidebar && (
-          <div className={`${isMobile ? `fixed inset-x-0 bottom-0 top-12 z-50 backdrop-blur-3xl ${isLight ? 'bg-white/60' : 'bg-black/60'}` : `relative h-full flex-shrink-0 border-l backdrop-blur-3xl rounded-[32px] overflow-hidden ml-2 ${isLight ? 'bg-white/30 border-black/5' : 'bg-black/20 border-white/5'}`}`}>
+          <div className={`${isMobile ? `fixed inset-x-0 bottom-0 top-12 z-50 backdrop-blur-3xl ${isLight ? 'bg-white/80' : 'bg-black/80'}` : `relative h-full flex-shrink-0 border-l backdrop-blur-3xl rounded-[32px] overflow-hidden ml-2 ${isLight ? 'bg-white/30 border-black/5' : 'bg-black/20 border-white/5'}`} ${activeSidebar === 'lyrics' ? 'w-80 md:w-96' : 'w-80'}`}>
             <div className="relative h-full w-full">
               {isMobile && (
                 <button
@@ -2115,6 +2158,16 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
               {activeSidebar === 'chat' && <ChatSidebar />}
               {activeSidebar === 'music' && <PlaylistSidebar theme={theme} onStartScreenShare={toggleScreenShare} />}
               {activeSidebar === 'mixer' && <AudioMixerPanel />}
+              {activeSidebar === 'lyrics' && (
+                <LyricsView
+                  currentTrack={musicState.currentTrack as any}
+                  currentTime={songProgress.current}
+                  isPlaying={musicState.isPlaying}
+                  theme={theme}
+                  onSeek={handleSeek}
+                  onClose={() => setActiveSidebar(null)}
+                />
+              )}
             </div>
           </div>
         )}
