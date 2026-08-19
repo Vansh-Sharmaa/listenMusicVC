@@ -64,6 +64,42 @@ function parseTimestamp(timeStr: string): number | null {
 }
 
 /**
+ * Automatic Korean Hangul Romanizer (Revised Romanization of Korean)
+ */
+const HANGUL_CHOSEONG = ['g', 'kk', 'n', 'd', 'tt', 'r', 'm', 'b', 'pp', 's', 'ss', '', 'j', 'jj', 'ch', 'k', 't', 'p', 'h'];
+const HANGUL_JUNGSEONG = ['a', 'ae', 'ya', 'yae', 'eo', 'e', 'yeo', 'ye', 'o', 'wa', 'wae', 'oe', 'yo', 'u', 'wo', 'we', 'wi', 'yu', 'eu', 'ui', 'i'];
+const HANGUL_JONGSEONG = ['', 'k', 'k', 'ks', 'n', 'nj', 'nh', 't', 'l', 'lg', 'lm', 'lb', 'ls', 'lt', 'lp', 'lh', 'm', 'p', 'ps', 't', 't', 'ng', 't', 't', 'k', 't', 'p', 'h'];
+
+export function romanizeKorean(text: string): string {
+  let result = '';
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code >= 0xac00 && code <= 0xd7a3) {
+      const offset = code - 0xac00;
+      const cho = Math.floor(offset / 588);
+      const jung = Math.floor((offset % 588) / 28);
+      const jong = offset % 28;
+      result += HANGUL_CHOSEONG[cho] + HANGUL_JUNGSEONG[jung] + HANGUL_JONGSEONG[jong];
+    } else {
+      result += text[i];
+    }
+  }
+  return result;
+}
+
+/**
+ * Generate automatic pronunciation / romanization guide for non-Latin songs
+ */
+export function autoRomanize(text: string): string | undefined {
+  if (!text) return undefined;
+  if (/[\uac00-\ud7a3]/.test(text)) {
+    const rom = romanizeKorean(text);
+    return rom !== text ? rom : undefined;
+  }
+  return undefined;
+}
+
+/**
  * Helper to extract word spans from TTML XML fragment
  */
 function extractWordsFromTTMLFragment(fragment: string, defaultStart: number, defaultEnd: number): LyricWord[] {
@@ -179,11 +215,14 @@ export function generateWordTimestamps(lines: LyricLine[], totalDuration?: numbe
       });
     }
 
+    const romanizedText = line.romanizedText || autoRomanize(line.text);
+
     return {
       ...line,
       endTime: lineEnd,
       words,
-      backgroundVocals
+      backgroundVocals,
+      romanizedText
     };
   });
 }
