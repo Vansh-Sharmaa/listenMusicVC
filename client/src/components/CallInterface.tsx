@@ -1033,9 +1033,9 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     }
 
     // ───────────────────────────────────────────
-    // Path B: Web Widgets (Spotify, Monochrome, SoundCloud)
+    // Path B: Web Widgets (Spotify, SoundCloud)
     // ───────────────────────────────────────────
-    if (extractSpotifyInfo(trackUrl) || isMonochromeUrl(trackUrl) || extractSoundCloudInfo(trackUrl)) {
+    if (extractSpotifyInfo(trackUrl) || extractSoundCloudInfo(trackUrl)) {
       if (audio && !audio.paused) audio.pause();
       if (ytPlayerRef.current && ytPlayerReadyRef.current) {
         try { ytPlayerRef.current.pauseVideo(); } catch (_) {}
@@ -2092,19 +2092,6 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                   allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
                   loading="lazy"
                   className="w-full h-full rounded-2xl"
-                />
-              )}
-
-              {/* Monochrome Web Lossless Player */}
-              {isMonochromeUrl(musicState.currentTrack.url) && (
-                <iframe
-                  src={musicState.currentTrack.url.startsWith('http') ? musicState.currentTrack.url : `https://${musicState.currentTrack.url}`}
-                  width="100%"
-                  height="100%"
-                  frameBorder="0"
-                  allow="autoplay; encrypted-media; fullscreen"
-                  loading="lazy"
-                  className="w-full h-full rounded-2xl bg-[#121212]"
                 />
               )}
 

@@ -169,21 +169,39 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
     },
     {
       id: 'monochrome-preset-1',
-      title: 'Monochrome Hi-Fi Chill (Studio Master)',
-      artist: 'Monochrome Lossless',
+      title: 'Monochrome Studio Chill (Lossless 320k)',
+      artist: 'Monochrome Hi-Fi',
       url: 'https://ia800905.us.archive.org/19/items/FREE_background_music_loops/chill_groove.mp3',
       duration: 425,
       isRoyaltyFree: true,
-      thumbnail: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100&auto=format&fit=crop&q=80'
+      thumbnail: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=200&auto=format&fit=crop&q=80'
     },
     {
       id: 'monochrome-preset-2',
       title: 'Monochrome Midnight Synthwave (FLAC Quality)',
-      artist: 'Monochrome Hi-Fi',
+      artist: 'Monochrome Master',
       url: 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3',
       duration: 302,
       isRoyaltyFree: true,
-      thumbnail: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=100&auto=format&fit=crop&q=80'
+      thumbnail: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=200&auto=format&fit=crop&q=80'
+    },
+    {
+      id: 'monochrome-preset-3',
+      title: 'Audiophile Acoustic Horizon (Lossless Master)',
+      artist: 'Hi-Fi Studio',
+      url: 'https://ia802802.us.archive.org/5/items/lofi-study-112191/lofi-study-112191.mp3',
+      duration: 372,
+      isRoyaltyFree: true,
+      thumbnail: 'https://images.unsplash.com/photo-1445307806294-bff7f67ff225?w=200&auto=format&fit=crop&q=80'
+    },
+    {
+      id: 'monochrome-preset-4',
+      title: 'Cyberpunk Neon Pulse (Hi-Res Master)',
+      artist: 'Monochrome Lab',
+      url: 'https://ia800905.us.archive.org/19/items/FREE_background_music_loops/chill_groove.mp3',
+      duration: 250,
+      isRoyaltyFree: true,
+      thumbnail: 'https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=200&auto=format&fit=crop&q=80'
     },
     {
       id: 'online-1',
@@ -604,21 +622,22 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
       {sidebarMode === 'monochrome' && (
         <div className="flex flex-col flex-1 overflow-hidden">
           {/* Monochrome Banner */}
-          <div className={`p-3 border-b space-y-2 ${isLight ? 'bg-cyan-50/50 border-black/5' : 'bg-cyan-950/30 border-cyan-900/30'}`}>
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-cyan-500/20">
-                <Zap size={14} className="text-cyan-400" />
+          <div className={`p-3 border-b space-y-2.5 ${isLight ? 'bg-cyan-50/50 border-black/5' : 'bg-cyan-950/30 border-cyan-900/30'}`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-cyan-500/20 text-cyan-400">
+                  <Zap size={15} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <p className={`text-xs font-bold ${isLight ? 'text-cyan-700' : 'text-cyan-300'}`}>Monochrome Lossless Hi-Fi</p>
+                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                      24-bit Sync
+                    </span>
+                  </div>
+                  <p className={`text-[10px] ${isLight ? 'text-black/50' : 'text-white/40'}`}>Synchronized high-fidelity audio stream across all tabs</p>
+                </div>
               </div>
-              <div>
-                <p className={`text-xs font-bold ${isLight ? 'text-cyan-700' : 'text-cyan-300'}`}>Monochrome.tf — Lossless Hi-Fi</p>
-                <p className={`text-[10px] ${isLight ? 'text-black/50' : 'text-white/40'}`}>Both users hear the same stream in sync</p>
-              </div>
-            </div>
-
-            {/* How to get URL tip */}
-            <div className={`text-[10px] rounded-xl p-2.5 flex gap-2 ${isLight ? 'bg-black/5 text-black/60' : 'bg-white/5 text-white/50'}`}>
-              <span>💡</span>
-              <span>On Monochrome, open a track → right-click the audio player → <strong>Copy audio address</strong> → paste below</span>
             </div>
 
             {/* Monochrome URL input */}
@@ -634,15 +653,15 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
                 setMonoSubmitting(true);
                 const newTrack = {
                   id: `mono-${Date.now()}`,
-                  title: monoTitle.trim() || 'Monochrome Track',
+                  title: monoTitle.trim() || 'Monochrome Lossless Track',
                   artist: monoArtist.trim() || 'Monochrome Hi-Fi',
                   url,
                   duration: 300,
                   isRoyaltyFree: false,
-                  thumbnail: 'https://monochrome.tf/favicon.ico'
+                  thumbnail: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=200&auto=format&fit=crop&q=80'
                 };
                 setTracks(prev => [newTrack, ...prev.filter(t => t.id !== newTrack.id)]);
-                handleTrackSelect(newTrack as any);
+                sendMusicAction('change', newTrack.id, 0, newTrack);
                 setMonoUrl('');
                 setMonoTitle('');
                 setMonoArtist('');
@@ -665,7 +684,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
                   type="text"
                   value={monoTitle}
                   onChange={e => setMonoTitle(e.target.value)}
-                  placeholder="Track name (optional)"
+                  placeholder="Track title (optional)"
                   className={`flex-1 border rounded-xl px-2.5 py-1.5 text-[11px] focus:outline-none focus:border-cyan-400 transition-all ${
                     isLight ? 'bg-black/5 border-black/10 text-black placeholder-black/30' : 'bg-white/5 border-white/15 text-white placeholder-white/30'
                   }`}
@@ -673,7 +692,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
                 <button
                   type="submit"
                   disabled={!monoUrl.trim() || monoSubmitting}
-                  className="bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-white text-[11px] px-3 py-1.5 rounded-xl font-bold transition-all active:scale-95 flex items-center gap-1 flex-shrink-0"
+                  className="bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-white text-[11px] px-3.5 py-1.5 rounded-xl font-bold transition-all active:scale-95 flex items-center gap-1 flex-shrink-0 shadow-md shadow-cyan-950/30"
                 >
                   {monoSubmitting ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} fill="white" />}
                   Play
@@ -681,28 +700,36 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
               </div>
             </form>
 
-            {/* Open Monochrome button */}
-            <a
-              href="https://monochrome.tf"
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`w-full flex items-center justify-center gap-1.5 text-[10px] font-semibold py-1.5 rounded-xl transition-all ${
-                isLight ? 'bg-black/5 hover:bg-black/10 text-black/60' : 'bg-white/5 hover:bg-white/10 text-white/50'
-              }`}
-            >
-              <ExternalLink size={10} /> Open Monochrome.tf to find tracks
-            </a>
+            {/* How to get URL tip */}
+            <div className={`text-[10px] rounded-xl p-2 flex items-center justify-between ${isLight ? 'bg-black/5 text-black/60' : 'bg-white/5 text-white/50'}`}>
+              <div className="flex items-center gap-1.5 truncate">
+                <span>💡</span>
+                <span className="truncate">Right-click player on Monochrome → <strong>Copy audio address</strong></span>
+              </div>
+              <a
+                href="https://monochrome.tf"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-cyan-400 hover:text-cyan-300 flex items-center gap-0.5 text-[10px] font-bold flex-shrink-0 ml-2"
+              >
+                <ExternalLink size={10} /> Open
+              </a>
+            </div>
           </div>
 
           {/* Now Playing (Monochrome) */}
-          {activeTrack && isMonochromeUrl(activeTrack.url) && (
+          {activeTrack && (isMonochromeUrl(activeTrack.url) || activeTrack.id.startsWith('mono-')) && (
             <div className={`p-3 border-b ${isLight ? 'bg-black/5 border-black/5' : 'bg-white/5 border-white/10'}`}>
               <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 mb-2 ${isLight ? 'text-cyan-600' : 'text-cyan-400'}`}>
-                <Radio size={10} className="animate-pulse" /> Now Streaming Hi-Fi
+                <Radio size={10} className="animate-pulse" /> Now Streaming Hi-Fi Lossless
               </span>
               <div className="flex items-center gap-2">
-                <div className="w-10 h-10 rounded-lg bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center flex-shrink-0">
-                  <Zap size={18} className="text-cyan-400" />
+                <div className="w-10 h-10 rounded-xl overflow-hidden bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center flex-shrink-0">
+                  {activeTrack.thumbnail ? (
+                    <img src={activeTrack.thumbnail} alt={activeTrack.title} className="w-full h-full object-cover" />
+                  ) : (
+                    <Zap size={18} className="text-cyan-400" />
+                  )}
                 </div>
                 <div className="flex flex-col min-w-0 flex-1">
                   <span className="text-xs font-semibold truncate">{activeTrack.title}</span>
@@ -710,7 +737,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
                 </div>
                 <button
                   onClick={handlePlayPause}
-                  className="bg-cyan-500 hover:bg-cyan-400 text-white rounded-full p-2 transition-all active:scale-95"
+                  className="bg-cyan-500 hover:bg-cyan-400 text-white rounded-full p-2 transition-all active:scale-95 shadow-md"
                 >
                   {musicState.isPlaying ? <Pause size={14} fill="white" /> : <Play size={14} fill="white" />}
                 </button>
@@ -720,42 +747,78 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
 
           {/* Monochrome preset / recent tracks */}
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            <p className={`text-[10px] uppercase tracking-widest font-bold px-1 pb-1 ${isLight ? 'text-black/30' : 'text-white/30'}`}>Recent & Demo Tracks</p>
+            <p className={`text-[10px] uppercase tracking-widest font-bold px-1 pb-1 ${isLight ? 'text-black/30' : 'text-white/30'}`}>Curated Lossless & Studio Masters</p>
             {tracks
               .filter(t => isMonochromeUrl(t.url) || t.id.startsWith('mono-'))
               .map(track => {
                 const isCurrent = track.id === musicState.currentTrackId;
                 return (
-                  <button
+                  <div
                     key={track.id}
-                    onClick={() => handleTrackSelect(track)}
-                    className={`w-full text-left p-2.5 rounded-xl flex items-center gap-2.5 transition-all ${
+                    className={`w-full p-2.5 rounded-2xl flex items-center gap-2.5 transition-all group ${
                       isCurrent
                         ? 'bg-cyan-500/15 border border-cyan-500/30'
                         : isLight ? 'bg-black/5 hover:bg-black/10 border border-transparent' : 'bg-white/5 hover:bg-white/10 border border-transparent'
                     }`}
                   >
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                      isCurrent ? 'bg-cyan-500/30' : isLight ? 'bg-black/10' : 'bg-white/10'
-                    }`}>
-                      <Zap size={14} className={isCurrent ? 'text-cyan-400' : isLight ? 'text-black/40' : 'text-white/40'} />
+                    <div 
+                      onClick={() => handleTrackSelect(track)}
+                      className={`w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0 cursor-pointer ${
+                        isCurrent ? 'bg-cyan-500/30' : isLight ? 'bg-black/10' : 'bg-white/10'
+                      }`}
+                    >
+                      {track.thumbnail ? (
+                        <img src={track.thumbnail} alt={track.title} className="w-full h-full object-cover" />
+                      ) : (
+                        <Zap size={16} className={isCurrent ? 'text-cyan-400' : isLight ? 'text-black/40' : 'text-white/40'} />
+                      )}
                     </div>
-                    <div className="flex flex-col min-w-0 flex-1">
+                    <div 
+                      onClick={() => handleTrackSelect(track)}
+                      className="flex flex-col min-w-0 flex-1 cursor-pointer"
+                    >
                       <span className={`text-xs font-semibold truncate ${
-                        isCurrent ? (isLight ? 'text-cyan-700' : 'text-cyan-300') : ''
+                        isCurrent ? (isLight ? 'text-cyan-700' : 'text-cyan-300 font-bold') : ''
                       }`}>{track.title}</span>
-                      <span className={`text-[10px] truncate ${isLight ? 'text-black/50' : 'text-white/40'}`}>{track.artist}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-[10px] truncate max-w-[120px] ${isLight ? 'text-black/50' : 'text-white/40'}`}>{track.artist}</span>
+                        <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-cyan-500/15 text-cyan-300">FLAC</span>
+                      </div>
                     </div>
-                    {isCurrent && <Radio size={12} className="text-cyan-400 animate-pulse flex-shrink-0" />}
-                  </button>
+
+                    <div className="flex items-center gap-1">
+                      {/* Add to Queue Button */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          sendMusicAction('queue-add', track.id, 0, track);
+                          alert(`Added "${track.title}" to Up Next! 🎶`);
+                        }}
+                        className={`p-1.5 rounded-lg text-[10px] transition-all ${isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white'}`}
+                        title="Add to Up Next Queue"
+                      >
+                        <Plus size={13} />
+                      </button>
+
+                      {/* Play Now Button */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleTrackSelect(track);
+                        }}
+                        className={`p-1.5 rounded-lg transition-all active:scale-95 shadow-md ${
+                          isCurrent
+                            ? 'bg-cyan-500 text-white'
+                            : 'bg-cyan-600/80 hover:bg-cyan-500 text-white'
+                        }`}
+                        title="Play Now for Room"
+                      >
+                        <Play size={13} fill="white" />
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
-            {tracks.filter(t => isMonochromeUrl(t.url) || t.id.startsWith('mono-')).length === 0 && (
-              <div className={`text-center py-8 text-xs ${isLight ? 'text-black/30' : 'text-white/30'}`}>
-                <Zap size={24} className="mx-auto mb-2 opacity-20" />
-                Paste a Monochrome.tf stream URL above to play lossless audio for everyone in the room
-              </div>
-            )}
           </div>
         </div>
       )}
