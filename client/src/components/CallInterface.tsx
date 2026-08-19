@@ -442,18 +442,43 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   // Multi-Platform Player state & refs
   const [showYtVideo, setShowYtVideo] = useState(true);
   const [isPlayerExpanded, setIsPlayerExpanded] = useState(false);
+  const [isYtApiReady, setIsYtApiReady] = useState(false);
   const ytPlayerRef = useRef<any>(null);
   const ytPlayerReadyRef = useRef<boolean>(false);
   const currentYtVideoIdRef = useRef<string | null>(null);
+  const lastAppliedStateVersionRef = useRef<number>(0);
 
-  // Load YouTube IFrame API script once
+  // Load YouTube IFrame API script once with deterministic ready callback & polling
   useEffect(() => {
-    if (typeof window !== 'undefined' && !(window as any).YT) {
+    if (typeof window === 'undefined') return;
+    if ((window as any).YT && (window as any).YT.Player) {
+      setIsYtApiReady(true);
+      return;
+    }
+
+    const prevReady = (window as any).onYouTubeIframeAPIReady;
+    (window as any).onYouTubeIframeAPIReady = () => {
+      if (prevReady) prevReady();
+      setIsYtApiReady(true);
+    };
+
+    if (!document.getElementById('youtube-iframe-api-script')) {
       const tag = document.createElement('script');
+      tag.id = 'youtube-iframe-api-script';
       tag.src = 'https://www.youtube.com/iframe_api';
       const firstScriptTag = document.getElementsByTagName('script')[0];
       firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
     }
+
+    // Safety fallback interval for fast-cached script loads
+    const checkInterval = setInterval(() => {
+      if ((window as any).YT && (window as any).YT.Player) {
+        setIsYtApiReady(true);
+        clearInterval(checkInterval);
+      }
+    }, 250);
+
+    return () => clearInterval(checkInterval);
   }, []);
 
   // Sync music element with Web Audio mixer
@@ -576,6 +601,11 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
         : 0;
       const targetPos = Math.max(0, (musicState.lastPosition || 0) + elapsed);
 
+      const isNewVersion = musicState.stateVersion !== lastAppliedStateVersionRef.current;
+      if (isNewVersion && musicState.stateVersion) {
+        lastAppliedStateVersionRef.current = musicState.stateVersion;
+      }
+
       if (!ytPlayerRef.current) {
         if ((window as any).YT && (window as any).YT.Player) {
           try {
@@ -644,7 +674,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
         }
       } else if (ytPlayerReadyRef.current) {
         try {
-          // If track changed: load the new video once at the synced position
+          // If track changed: load the new video at the authoritative synced position
           if (currentYtVideoIdRef.current !== ytId) {
             currentYtVideoIdRef.current = ytId;
             ytPlayerRef.current.loadVideoById({
@@ -654,6 +684,11 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
           }
 
           ytPlayerRef.current.setVolume(Math.max(0, Math.min(100, Math.round(musicVolume * 100))));
+
+          // If this is a newly received authoritative state change event (e.g. seek or play/pause)
+          if (isNewVersion) {
+            ytPlayerRef.current.seekTo(targetPos, true);
+          }
 
           if (musicState.isPlaying) {
             ytPlayerRef.current.playVideo();
@@ -680,7 +715,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             ytPlayerRef.current.pauseVideo();
             if (ytPlayerRef.current.setPlaybackRate) ytPlayerRef.current.setPlaybackRate(1.0);
             const currentPos = ytPlayerRef.current.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : 0;
-            if (musicState.lastPosition !== undefined && Math.abs(currentPos - musicState.lastPosition) > 1.0) {
+            if (musicState.lastPosition !== undefined && Math.abs(currentPos - musicState.lastPosition) > 0.5) {
               ytPlayerRef.current.seekTo(musicState.lastPosition, true);
             }
           }
@@ -753,7 +788,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     };
 
     syncAudio();
-  }, [musicState, getServerTime, musicVolume]);
+  }, [musicState, getServerTime, musicVolume, isYtApiReady]);
 
   // Sync local video element
   useEffect(() => {
@@ -1679,6 +1714,28 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Autoplay Recovery Banner for Mobile/Safari/Background Devices */}
+          {autoplayBlocked && musicState.isPlaying && (
+            <button
+              onClick={() => {
+                setAutoplayBlocked(false);
+                if (audioContext && audioContext.state === 'suspended') {
+                  audioContext.resume().catch(() => {});
+                }
+                if (ytPlayerRef.current && ytPlayerReadyRef.current) {
+                  try { ytPlayerRef.current.playVideo(); } catch (_) {}
+                }
+                if (musicAudioRef.current) {
+                  musicAudioRef.current.play().catch(() => {});
+                }
+              }}
+              className="absolute top-16 left-1/2 -translate-x-1/2 z-40 bg-gradient-to-r from-fuchsia-600 to-pink-600 text-white text-xs font-bold px-4 py-2 rounded-2xl shadow-2xl border border-fuchsia-400 animate-bounce flex items-center gap-2"
+            >
+              <Play size={14} fill="white" />
+              <span>Tap to Join Live Music in Sync</span>
+            </button>
           )}
 
           {/* Global Synchronized Music Pill & Interactive Shared Seek Bar (when song is selected) */}
