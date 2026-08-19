@@ -204,6 +204,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
       if (payload.djPasscode) {
         setDjPasscode(payload.djPasscode);
+      } else {
+        setDjPasscode(null);
       }
       if (payload.isDjAuthorized !== undefined) {
         setIsDjAuthorizedState(payload.isDjAuthorized);

@@ -56,15 +56,14 @@ export function setupSockets(io: Server) {
         }
         (socket as any).data = { userId, username, roomId };
 
-        // If this user is the first/only person in the room OR host is inactive, assign this user as Host
-        const isHostActiveInRoom = room?.hostId && (room.hostId === userId || existingSockets.some(s => s.userId === room.hostId));
-        if (!isHostActiveInRoom || !room?.hostId) {
+        // Assign creator as Host if room doesn't have a host yet
+        if (!room?.hostId) {
           room = await db.setRoomHost(roomId, userId);
         }
 
         const isHost = Boolean(room?.hostId && room.hostId === userId);
-        const djPasscode = isHost ? db.generateNewDjPasscode(roomId, userId) : undefined;
-        const isDjAuthorized = isHost;
+        const djPasscode = isHost ? db.getDjPasscode(roomId) : undefined;
+        const isDjAuthorized = await db.isDjAuthorized(roomId, userId);
 
         // Initialize participant media state (Camera OFF, Mic OFF by default)
         const initialMediaState = db.updateParticipantMediaState(roomId, userId, {
