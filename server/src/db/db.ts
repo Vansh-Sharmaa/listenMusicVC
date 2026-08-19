@@ -193,6 +193,17 @@ class MockDatabase {
     return this.getRoom(roomId);
   }
 
+  setRoomHost(roomId: string, hostId: string) {
+    let room = this.rooms.get(roomId);
+    if (room) {
+      room.hostId = hostId;
+    }
+    const djs = this.roomAuthorizedDjs.get(roomId) || new Set<string>();
+    djs.add(hostId);
+    this.roomAuthorizedDjs.set(roomId, djs);
+    return this.getRoom(roomId);
+  }
+
   async leaveRoom(roomId: string, userId: string) {
     const participants = this.participants.get(roomId) || [];
     const updated = participants.filter(p => p.userId !== userId);
@@ -550,5 +561,18 @@ export const db = {
       return true;
     }
     return false;
+  },
+
+  setRoomHost: async (roomId: string, hostId: string) => {
+    mockDb.setRoomHost(roomId, hostId);
+    if (!useMock && prisma) {
+      try {
+        await prisma.room.update({
+          where: { id: roomId },
+          data: { hostId }
+        });
+      } catch (_) {}
+    }
+    return db.getRoom(roomId);
   }
 };

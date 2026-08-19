@@ -31,7 +31,7 @@ export function setupSockets(io: Server) {
 
       try {
         // Save membership in database
-        const room = await db.joinRoom(roomId, userId, username);
+        let room = await db.joinRoom(roomId, userId, username);
         
         // Fetch active music state
         const musicState = await db.getRoomMusicState(roomId);
@@ -56,9 +56,17 @@ export function setupSockets(io: Server) {
         }
         (socket as any).data = { userId, username, roomId };
 
+        // If this user is the first/only person in the room OR host is inactive, assign this user as Host
+        const isHostActiveInRoom = room?.hostId && (room.hostId === userId || existingSockets.some(s => s.userId === room.hostId));
+        if (!isHostActiveInRoom || !room?.hostId) {
+          room = await db.setRoomHost(roomId, userId);
+        }
+
         const isHost = Boolean(room?.hostId && room.hostId === userId);
-        const isDjAuthorized = await db.isDjAuthorized(roomId, userId);
+        const isDjAuthorized = isHost || (await db.isDjAuthorized(roomId, userId));
         const djPasscode = isHost ? db.getDjPasscode(roomId) : undefined;
+
+        console.log(`[Room Join] User "${username}" (${userId}) joined room "${roomId}". isHost: ${isHost}, hostId: "${room?.hostId}", djPasscode: "${djPasscode}"`);
 
         // Send room state confirmation
         socket.emit('room:joined', {
@@ -326,6 +334,35 @@ export function setupSockets(io: Server) {
             username: currentUsername,
             socketId: socket.id
           });
+
+          // If the disconnected user was the host, promote the next active user to Host
+          const room = await db.getRoom(currentRoomId);
+          if (room?.hostId === currentUserId) {
+            const socketRoom = io.sockets.adapter.rooms.get(currentRoomId);
+            if (socketRoom && socketRoom.size > 0) {
+              const nextSocketId = Array.from(socketRoom)[0];
+              const nextSocket = io.sockets.sockets.get(nextSocketId);
+              const nextUserId = (nextSocket as any)?.data?.userId;
+              const nextUsername = (nextSocket as any)?.data?.username;
+              if (nextUserId) {
+                await db.setRoomHost(currentRoomId, nextUserId);
+                const newPasscode = db.getDjPasscode(currentRoomId);
+                console.log(`[Host Promoted] User ${nextUsername} (${nextUserId}) promoted to Host in room ${currentRoomId}. New PIN: ${newPasscode}`);
+
+                nextSocket?.emit('room:host-promoted', {
+                  hostId: nextUserId,
+                  djPasscode: newPasscode,
+                  isHost: true,
+                  isDjAuthorized: true
+                });
+
+                io.to(currentRoomId).emit('room:host-updated', {
+                  hostId: nextUserId,
+                  hostUsername: nextUsername
+                });
+              }
+            }
+          }
 
           // Update Redis user list cache
           const cachedUsers = await cache.get(`room:${currentRoomId}:users`);

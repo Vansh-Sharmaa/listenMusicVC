@@ -208,6 +208,19 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     });
 
+    // Host promotion & updates
+    sock.on('room:host-promoted', (payload: { hostId: string; djPasscode: string; isHost: boolean; isDjAuthorized: boolean }) => {
+      console.log(`[Socket] Promoted to Host! Passcode:`, payload.djPasscode);
+      setHostId(payload.hostId);
+      if (payload.djPasscode) setDjPasscode(payload.djPasscode);
+      setIsDjAuthorizedState(true);
+    });
+
+    sock.on('room:host-updated', (payload: { hostId: string; hostUsername?: string }) => {
+      console.log(`[Socket] Room host updated to:`, payload.hostId);
+      setHostId(payload.hostId);
+    });
+
     // DJ PIN Unlock responses
     sock.on('room:dj-unlocked', (payload: { isDjAuthorized: boolean; message: string }) => {
       console.log(`[Socket] DJ access unlocked!`, payload);
