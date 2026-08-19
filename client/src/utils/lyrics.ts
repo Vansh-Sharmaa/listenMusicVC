@@ -108,14 +108,7 @@ function extractWordsFromTTMLFragment(fragment: string, defaultStart: number, de
  */
 export function generateWordTimestamps(lines: LyricLine[], totalDuration?: number): LyricLine[] {
   return lines.map((line, idx) => {
-    // If words are already parsed with timestamps (e.g. from enhanced LRC or TTML), keep them
-    if (line.words && line.words.length > 0) {
-      return line;
-    }
-
     const rawWords = line.text.trim().split(/\s+/).filter(Boolean);
-    if (!rawWords.length) return line;
-
     const lineStart = line.time;
     const nextLine = lines[idx + 1];
     let lineEnd: number;
@@ -138,22 +131,59 @@ export function generateWordTimestamps(lines: LyricLine[], totalDuration?: numbe
     const vocalDuration = lineDur * 0.90;
     let currentWordStart = lineStart;
 
-    const words: LyricWord[] = rawWords.map((w, wIdx) => {
-      const wordDur = (weights[wIdx] / totalWeight) * vocalDuration;
-      const wStart = currentWordStart;
-      const wEnd = currentWordStart + wordDur;
-      currentWordStart = wEnd;
-      return {
-        text: w,
-        startTime: Math.round(wStart * 1000) / 1000,
-        endTime: Math.round(wEnd * 1000) / 1000
-      };
-    });
+    let words: LyricWord[] = line.words || [];
+    if (!words || words.length === 0) {
+      words = rawWords.map((w, wIdx) => {
+        const wordDur = (weights[wIdx] / totalWeight) * vocalDuration;
+        const wStart = currentWordStart;
+        const wEnd = currentWordStart + wordDur;
+        currentWordStart = wEnd;
+        return {
+          text: w,
+          startTime: Math.round(wStart * 1000) / 1000,
+          endTime: Math.round(wEnd * 1000) / 1000
+        };
+      });
+    }
+
+    // Generate word timings for background vocals if needed
+    let backgroundVocals = line.backgroundVocals;
+    if (backgroundVocals && backgroundVocals.length > 0) {
+      backgroundVocals = backgroundVocals.map(bg => {
+        if (bg.words && bg.words.length > 0) return bg;
+        const bgWordsRaw = bg.text.trim().split(/\s+/).filter(Boolean);
+        if (!bgWordsRaw.length) return bg;
+        const bgStart = bg.time || (lineStart + lineDur * 0.25);
+        const bgEnd = bg.endTime || lineEnd;
+        const bgDur = Math.max(0.4, bgEnd - bgStart);
+        const bgWeights = bgWordsRaw.map(w => Math.max(1, w.length));
+        const bgTotalWeight = bgWeights.reduce((s, w) => s + w, 0);
+        let curBg = bgStart;
+        const bgWords: LyricWord[] = bgWordsRaw.map((w, wIdx) => {
+          const wDur = (bgWeights[wIdx] / bgTotalWeight) * bgDur * 0.92;
+          const s = curBg;
+          const e = s + wDur;
+          curBg = e;
+          return {
+            text: w,
+            startTime: Math.round(s * 1000) / 1000,
+            endTime: Math.round(e * 1000) / 1000
+          };
+        });
+        return {
+          ...bg,
+          time: bgStart,
+          endTime: bgEnd,
+          words: bgWords
+        };
+      });
+    }
 
     return {
       ...line,
       endTime: lineEnd,
-      words
+      words,
+      backgroundVocals
     };
   });
 }
@@ -250,7 +280,7 @@ export function parseTTML(ttmlText: string): LyricLine[] {
 }
 
 /**
- * Parse an LRC string into structured array of timed lines, with support for Enhanced LRC word tags: <00:12.34>word
+ * Parse an LRC string into structured array of timed lines, with support for Enhanced LRC word tags and parenthesized Apple Music ad-libs
  */
 export function parseLRC(lrcText: string): LyricLine[] {
   if (!lrcText) return [];
@@ -293,7 +323,6 @@ export function parseLRC(lrcText: string): LyricLine[] {
           const wStart = minutes * 60 + seconds + ms / 1000;
           const text = wMatch[4].trim();
 
-          // Calculate end time as next word's start time or default
           let wEnd = wStart + 0.4;
           if (i < wMatches.length - 1) {
             const nextMatch = wMatches[i + 1];
@@ -310,12 +339,42 @@ export function parseLRC(lrcText: string): LyricLine[] {
       }
     }
 
-    const textOnly = cleanLine
+    let textOnly = cleanLine
       .replace(lineTimeRegex, '')
       .replace(/<\d{1,2}:\d{2}\.?\d{0,3}?>/g, '')
       .trim();
 
     if (!textOnly) continue;
+
+    // Check for Apple Music parenthesized ad-libs & background vocals
+    let isBg = false;
+    let bgVocals: BackgroundVocal[] | undefined = undefined;
+
+    // Case 1: Entire line is in parentheses -> "(Dance in the darkness)" or "(Yeah, yeah)"
+    const fullParenMatch = textOnly.match(/^\(([^)]+)\)$/);
+    if (fullParenMatch) {
+      isBg = true;
+      textOnly = fullParenMatch[1].trim();
+    } else {
+      // Case 2: Line has parenthesized ad-lib at the end -> "Dance, dance with me, dance (You're the light I feel)"
+      const trailingParenMatch = textOnly.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+      if (trailingParenMatch && trailingParenMatch[1].trim().length > 0) {
+        textOnly = trailingParenMatch[1].trim();
+        const adLibText = trailingParenMatch[2].trim();
+        for (const match of lineMatches) {
+          const minutes = parseInt(match[1], 10);
+          const seconds = parseInt(match[2], 10);
+          const msStr = match[3] || '0';
+          const milliseconds = msStr.length === 2 ? parseInt(msStr, 10) * 10 : parseInt(msStr.padEnd(3, '0').slice(0, 3), 10);
+          const totalSeconds = minutes * 60 + seconds + milliseconds / 1000;
+          bgVocals = [{
+            text: adLibText,
+            time: totalSeconds + 0.8,
+            endTime: totalSeconds + 4.0
+          }];
+        }
+      }
+    }
 
     for (const match of lineMatches) {
       const minutes = parseInt(match[1], 10);
@@ -327,7 +386,9 @@ export function parseLRC(lrcText: string): LyricLine[] {
       parsedLines.push({
         time: totalSeconds,
         text: textOnly,
-        words: words && words.length > 0 ? words : undefined
+        words: words && words.length > 0 ? words : undefined,
+        isBackgroundVocal: isBg,
+        backgroundVocals: bgVocals
       });
     }
   }
