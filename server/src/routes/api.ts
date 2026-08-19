@@ -351,7 +351,40 @@ apiRouter.get('/lyrics', async (req: Request, res: Response) => {
       }
     };
 
-    // 1. Try exact match from LRCLIB
+    // 1. Try Apple Music / BiniLyrics TTML Word-Synced API (Primary for exact word-by-word timestamps)
+    try {
+      const biniParams = new URLSearchParams({
+        track: cleanTitle,
+        ...(cleanArtist ? { artist: cleanArtist } : {}),
+        ...(duration ? { duration: duration.toString() } : {})
+      });
+      const biniRes = await fetchWithTimeout(`https://lyrics-api.binimum.org/?${biniParams.toString()}`, {}, 3000);
+      if (biniRes.ok) {
+        const biniData = (await biniRes.json()) as any;
+        if (biniData && Array.isArray(biniData.results) && biniData.results.length > 0) {
+          const hit = biniData.results[0];
+          if (hit.lyricsUrl) {
+            const ttmlRes = await fetchWithTimeout(hit.lyricsUrl, {}, 3000);
+            if (ttmlRes.ok) {
+              const ttmlText = await ttmlRes.text();
+              return res.json({
+                id: hit.id || `bini-${Date.now()}`,
+                trackName: hit.track_name || cleanTitle,
+                artistName: hit.artist_name || cleanArtist,
+                syncedLyrics: ttmlText,
+                format: 'ttml',
+                source: 'AppleMusic-WordSync',
+                isWordSynced: true
+              });
+            }
+          }
+        }
+      }
+    } catch (biniErr) {
+      console.warn('[Lyrics API] BiniLyrics TTML fetch error, falling back to LRCLIB:', biniErr);
+    }
+
+    // 2. Try exact match from LRCLIB
     const queryParams = new URLSearchParams({
       track_name: cleanTitle,
       ...(cleanArtist ? { artist_name: cleanArtist } : {}),

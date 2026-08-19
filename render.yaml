@@ -1,0 +1,30 @@
+services:
+  # ─── Backend Web Service (Node.js + Express + Socket.io) ───
+  - type: web
+    name: listenmusicvc-server
+    env: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: CLIENT_ORIGIN
+        sync: false # Set to your deployed client URL (e.g., https://listenmusicvc.onrender.com or https://your-domain.vercel.app)
+
+  # ─── Frontend Web Service (Next.js) ───
+  - type: web
+    name: listenmusicvc-client
+    env: node
+    plan: free
+    rootDir: client
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_SERVER_URL
+        sync: false # Set to your deployed backend URL (e.g., https://listenmusicvc-server.onrender.com)

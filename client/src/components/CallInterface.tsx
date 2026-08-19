@@ -78,36 +78,41 @@ const RemoteVideoPlayer: React.FC<{
     const audio = audioRef.current;
     if (!stream) return;
 
-    if (video) {
-      video.srcObject = stream;
-      video.play().then(() => {
-        if (video.videoWidth > 0) setIsVideoPlaying(true);
-      }).catch(() => {});
-    }
-
-    if (audio) {
-      audio.srcObject = stream;
-      audio.play().catch(e => console.warn('[Audio] Direct remote audio playback waiting for gesture:', e));
-    }
-
-    const checkTrackStatus = () => {
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().then(() => {
-          if (videoRef.current && videoRef.current.videoWidth > 0) {
-            setIsVideoPlaying(true);
-          }
+    const playMedia = () => {
+      if (video) {
+        video.srcObject = stream;
+        video.play().then(() => {
+          if (video.videoWidth > 0) setIsVideoPlaying(true);
         }).catch(() => {});
       }
-      if (audioRef.current) {
-        audioRef.current.srcObject = stream;
-        audioRef.current.play().catch(() => {});
+      if (audio) {
+        audio.srcObject = stream;
+        audio.play().catch(() => {});
       }
     };
 
-    stream.onaddtrack = checkTrackStatus;
-    stream.onremovetrack = checkTrackStatus;
-  }, [stream]);
+    playMedia();
+
+    stream.onaddtrack = playMedia;
+    stream.onremovetrack = playMedia;
+
+    const onUserGesture = () => {
+      if (video && video.paused && (cameraEnabled || isVideoPlaying)) {
+        video.play().catch(() => {});
+      }
+      if (audio && audio.paused) {
+        audio.play().catch(() => {});
+      }
+    };
+
+    window.addEventListener('click', onUserGesture, { passive: true });
+    window.addEventListener('touchstart', onUserGesture, { passive: true });
+
+    return () => {
+      window.removeEventListener('click', onUserGesture);
+      window.removeEventListener('touchstart', onUserGesture);
+    };
+  }, [stream, cameraEnabled, isVideoPlaying]);
 
   // Video is visible if camera is explicitly enabled OR if incoming video track is active
   const showVideo = cameraEnabled !== undefined ? cameraEnabled : isVideoPlaying;
@@ -237,8 +242,48 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   const mockOscillatorRef = useRef<OscillatorNode | null>(null);
   const mockOscillatorGainRef = useRef<GainNode | null>(null);
 
-  // Sidebar toggles
+  // Sidebar toggles & Resizable slide/extend width
   const [activeSidebar, setActiveSidebar] = useState<'chat' | 'music' | 'mixer' | 'lyrics' | null>('music');
+  const [sidebarWidth, setSidebarWidth] = useState<number>(440);
+  const [isDraggingSidebar, setIsDraggingSidebar] = useState<boolean>(false);
+  const isResizingSidebarRef = useRef<boolean>(false);
+  const resizeStartXRef = useRef<number>(0);
+  const resizeStartWidthRef = useRef<number>(440);
+
+  const handleSidebarResizeStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    isResizingSidebarRef.current = true;
+    setIsDraggingSidebar(true);
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    resizeStartXRef.current = clientX;
+    resizeStartWidthRef.current = sidebarWidth;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+
+    const onMouseMove = (moveEvent: MouseEvent | TouchEvent) => {
+      if (!isResizingSidebarRef.current) return;
+      const curX = 'touches' in moveEvent ? moveEvent.touches[0].clientX : moveEvent.clientX;
+      const delta = resizeStartXRef.current - curX;
+      const newWidth = Math.min(Math.max(340, resizeStartWidthRef.current + delta), window.innerWidth * 0.75);
+      setSidebarWidth(Math.round(newWidth));
+    };
+
+    const onMouseUp = () => {
+      isResizingSidebarRef.current = false;
+      setIsDraggingSidebar(false);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('touchmove', onMouseMove);
+      window.removeEventListener('touchend', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('touchmove', onMouseMove);
+    window.addEventListener('touchend', onMouseUp);
+  }, [sidebarWidth]);
+
   const [showReactionMenu, setShowReactionMenu] = useState(false);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const [songPalette, setSongPalette] = useState<SongColorPalette | null>(null);
@@ -810,12 +855,8 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     return () => cancelAnimationFrame(animFrameId);
   }, [musicState]);
 
-  // Handle user seeking on the shared timeline bar
+  // Handle user seeking on the shared timeline bar or lyrics line click
   const handleSeek = (newTime: number) => {
-    if (!isDjAuthorized) {
-      alert('👑 Only the room creator (Host) or authorized DJs with the 4-digit PIN can seek or control the music.');
-      return;
-    }
     isSeekingRef.current = false;
     isLocalTriggeredRef.current = true;
     setSongProgress(prev => ({ ...prev, current: newTime }));
@@ -828,7 +869,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     }
 
     sendMusicAction('seek', musicState.currentTrackId, newTime, musicState.currentTrack);
-    setTimeout(() => { isLocalTriggeredRef.current = false; }, 500);
+    setTimeout(() => { isLocalTriggeredRef.current = false; }, 400);
   };
 
   const isProgrammaticActionRef = useRef<boolean>(false);
@@ -1514,11 +1555,16 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             localStreamRef.current.removeTrack(audioTracks[0]);
             localStreamRef.current.addTrack(realTrack);
             peerConnectionsRef.current.forEach(pc => {
+              let replaced = false;
               pc.getSenders().forEach(s => {
                 if (s.track?.kind === 'audio' && !Array.from(screenShareSendersRef.current.values()).some(list => list.includes(s))) {
                   s.replaceTrack(realTrack).catch(() => {});
+                  replaced = true;
                 }
               });
+              if (!replaced && localStreamRef.current) {
+                try { pc.addTrack(realTrack, localStreamRef.current); } catch (_) {}
+              }
             });
             processLocalMicTrack(realTrack).catch(() => {});
           }
@@ -1589,11 +1635,16 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             localStreamRef.current.removeTrack(videoTracks[0]);
             localStreamRef.current.addTrack(realTrack);
             peerConnectionsRef.current.forEach(pc => {
+              let replaced = false;
               pc.getSenders().forEach(s => {
                 if (s.track?.kind === 'video' && !Array.from(screenShareSendersRef.current.values()).some(list => list.includes(s))) {
                   s.replaceTrack(realTrack).catch(() => {});
+                  replaced = true;
                 }
               });
+              if (!replaced && localStreamRef.current) {
+                try { pc.addTrack(realTrack, localStreamRef.current); } catch (_) {}
+              }
             });
             if (localVideoRef.current) {
               localVideoRef.current.srcObject = localStreamRef.current;
@@ -2630,7 +2681,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                           type="range"
                           min={0}
                           max={1}
-                          step={0.01}
+                        step={0.01}
                           value={musicVolume}
                           onChange={(e) => {
                             const v = parseFloat(e.target.value);
@@ -2688,7 +2739,15 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             <div className={`absolute top-2 right-2 md:top-4 md:right-6 z-30 border backdrop-blur-3xl px-4 py-3 rounded-[32px] shadow-[0_8px_32px_rgba(0,0,0,0.4)] flex flex-col gap-2 animate-fade-in w-64 sm:w-80 md:w-96 transition-all duration-500 ${isLight ? 'bg-white/80 border-white/40' : 'bg-black/30 border-white/10'}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <span className={`h-2 w-2 rounded-full animate-pulse flex-shrink-0 ${isLight ? 'bg-fuchsia-500' : 'bg-fuchsia-400'}`} />
+                  {musicState.isPlaying ? (
+                    <div className="flex items-end gap-[3px] h-3.5 flex-shrink-0 px-0.5" title="Playing">
+                      <span className="w-[3px] h-full bg-fuchsia-400 rounded-full animate-[bounce_0.8s_infinite_100ms]" />
+                      <span className="w-[3px] h-2/3 bg-fuchsia-400 rounded-full animate-[bounce_0.8s_infinite_300ms]" />
+                      <span className="w-[3px] h-4/5 bg-fuchsia-400 rounded-full animate-[bounce_0.8s_infinite_200ms]" />
+                    </div>
+                  ) : (
+                    <span className={`h-2 w-2 rounded-full flex-shrink-0 ${isLight ? 'bg-fuchsia-500/50' : 'bg-fuchsia-400/50'}`} />
+                  )}
                   <div className="flex flex-col min-w-0">
                     <span className={`text-xs md:text-sm font-bold truncate ${isLight ? 'text-black' : 'text-white'}`}>
                       {musicState.currentTrack.title}
@@ -2781,22 +2840,19 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                   max={Math.max(1, songProgress.duration || 180)}
                   step="0.5"
                   value={songProgress.current}
-                  disabled={!isDjAuthorized}
-                  onMouseDown={() => { if (isDjAuthorized) isSeekingRef.current = true; }}
-                  onTouchStart={() => { if (isDjAuthorized) isSeekingRef.current = true; }}
+                  onMouseDown={() => { isSeekingRef.current = true; }}
+                  onTouchStart={() => { isSeekingRef.current = true; }}
                   onChange={(e) => {
-                    if (isDjAuthorized) {
-                      const val = parseFloat(e.target.value);
-                      setSongProgress(prev => ({ ...prev, current: val }));
-                    }
+                    const val = parseFloat(e.target.value);
+                    setSongProgress(prev => ({ ...prev, current: val }));
                   }}
                   onMouseUp={(e) => {
-                    if (isDjAuthorized) handleSeek(parseFloat((e.target as HTMLInputElement).value));
+                    handleSeek(parseFloat((e.target as HTMLInputElement).value));
                   }}
                   onTouchEnd={(e) => {
-                    if (isDjAuthorized) handleSeek(parseFloat((e.target as HTMLInputElement).value));
+                    handleSeek(parseFloat((e.target as HTMLInputElement).value));
                   }}
-                  className={`flex-1 h-1.5 bg-white/10 rounded-lg appearance-none accent-fuchsia-500 transition-all ${isDjAuthorized ? 'cursor-pointer hover:h-2' : 'cursor-not-allowed opacity-50'}`}
+                  className="flex-1 h-1.5 bg-white/10 rounded-lg appearance-none accent-fuchsia-500 transition-all cursor-pointer hover:h-2"
                 />
                 <span className="text-[10px] text-white/50 font-mono w-7">
                   {Math.floor((songProgress.duration || 180) / 60)}:{Math.floor((songProgress.duration || 180) % 60).toString().padStart(2, '0')}
@@ -2837,24 +2893,29 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
               <span className="hidden sm:inline text-[11px]">{camOn ? 'Cam ON' : 'Cam OFF'}</span>
             </button>
 
-            {/* Screen Share Button */}
+            {/* Screen Share Toggle */}
             <button
               onClick={toggleScreenShare}
               aria-label={isScreenSharing ? "Stop sharing screen" : "Share screen"}
               title={isScreenSharing ? "Stop sharing screen" : "Share screen"}
-              className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${isScreenSharing ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`}
+              className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center gap-1.5 justify-center active:scale-90 font-bold text-xs ${
+                isScreenSharing
+                  ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-950/40 border border-blue-400'
+                  : (isLight ? 'bg-black/5 hover:bg-black/10 text-black/50 border border-black/10' : 'bg-white/10 hover:bg-white/20 text-white/50 border border-white/10')
+              }`}
             >
               <Monitor size={18} />
+              <span className="hidden sm:inline text-[11px]">{isScreenSharing ? 'Sharing' : 'Share'}</span>
             </button>
-            <button onClick={() => setShowReactionMenu(!showReactionMenu)} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${showReactionMenu ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`}>
-              <Smile size={18} />
-            </button>
-            <span className={`w-[1px] h-5 mx-0.5 md:mx-1 ${isLight ? 'bg-black/10' : 'bg-white/10'}`} />
-            <button onClick={() => setActiveSidebar(activeSidebar === 'mixer' ? null : 'mixer')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'mixer' ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`} title="Volume Mixer">
-              <Sliders size={18} />
-            </button>
-            <button onClick={() => setActiveSidebar(activeSidebar === 'music' ? null : 'music')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'music' ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`} title="Music Library">
+
+            <div className={`h-6 w-[1px] my-auto mx-1 ${isLight ? 'bg-black/10' : 'bg-white/10'} `} />
+
+            {/* Sidebars & Controls Toggles */}
+            <button onClick={() => setActiveSidebar(activeSidebar === 'music' ? null : 'music')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'music' ? 'bg-fuchsia-600 text-white shadow-lg shadow-fuchsia-950/40' : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`} title="Music Playlist">
               <Music size={18} />
+            </button>
+            <button onClick={() => setActiveSidebar(activeSidebar === 'mixer' ? null : 'mixer')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'mixer' ? 'bg-fuchsia-600 text-white shadow-lg shadow-fuchsia-950/40' : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`} title="Audio Mixer">
+              <Volume2 size={18} />
             </button>
             <button onClick={() => setActiveSidebar(activeSidebar === 'lyrics' ? null : 'lyrics')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'lyrics' ? 'bg-fuchsia-600 text-white shadow-lg shadow-fuchsia-950/40' : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`} title="Live Apple Lyrics">
               <Mic2 size={18} />
@@ -2862,15 +2923,34 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             <button onClick={() => setActiveSidebar(activeSidebar === 'chat' ? null : 'chat')} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${activeSidebar === 'chat' ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`} title="Chat">
               <MessageSquare size={18} />
             </button>
-            <button onClick={handleLeaveCall} className="p-2.5 md:p-3.5 rounded-2xl bg-red-500 hover:bg-red-400 text-white transition-all active:scale-90 duration-300" title="Leave Room">
+            <button onClick={handleLeaveCall} className="p-2.5 md:p-3.5 rounded-2xl bg-red-500 hover:bg-red-400 text-white transition-all active:scale-90 duration-300 shadow-lg shadow-red-950/30" title="Leave Room">
               <PhoneOff size={18} />
             </button>
           </div>
         </div>
 
-        {/* Sidebars (Mobile modal bottom-sheet / overlay on iPhone, side-docked on desktop) */}
+        {/* Sidebars (Resizable on desktop with liquid spring physics, bottom-sheet on mobile) */}
         {activeSidebar && (
-          <div className={`${isMobile ? `fixed inset-x-0 bottom-0 top-12 z-50 backdrop-blur-3xl ${isLight ? 'bg-white/80' : 'bg-black/80'}` : `relative h-full flex-shrink-0 border-l backdrop-blur-3xl rounded-[32px] overflow-hidden ml-2 ${isLight ? 'bg-white/30 border-black/5' : 'bg-black/20 border-white/5'}`} ${activeSidebar === 'lyrics' ? 'w-80 md:w-96' : 'w-80'}`}>
+          <div
+            style={!isMobile ? {
+              width: `${sidebarWidth}px`,
+              transition: isDraggingSidebar ? 'none' : 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1)'
+            } : undefined}
+            className={`${isMobile ? `fixed inset-x-0 bottom-0 top-12 z-50 backdrop-blur-3xl ${isLight ? 'bg-white/80' : 'bg-black/80'}` : `relative h-full flex-shrink-0 border-l backdrop-blur-3xl rounded-[32px] overflow-hidden ml-2 ${isLight ? 'bg-white/30 border-black/5' : 'bg-black/20 border-white/5'}`}`}
+          >
+            {/* Drag Resize Handle on left edge for desktop */}
+            {!isMobile && (
+              <div
+                onMouseDown={handleSidebarResizeStart}
+                onTouchStart={handleSidebarResizeStart}
+                onDoubleClick={() => setSidebarWidth(prev => prev > 550 ? 440 : 700)}
+                className="absolute top-0 bottom-0 left-0 w-3.5 z-40 hover:w-5 group cursor-col-resize flex items-center justify-center transition-all select-none"
+                title="Drag to extend lyrics • Double click to toggle wide"
+              >
+                <div className="w-1 h-14 rounded-full bg-white/20 group-hover:bg-fuchsia-400 group-hover:scale-y-125 group-hover:shadow-[0_0_12px_rgba(232,121,249,0.8)] transition-all duration-200" />
+              </div>
+            )}
+
             <div className="relative h-full w-full">
               {isMobile && (
                 <button
@@ -2897,6 +2977,8 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                   theme={theme}
                   onSeek={handleSeek}
                   onClose={() => setActiveSidebar(null)}
+                  sidebarWidth={sidebarWidth}
+                  onSetSidebarWidth={setSidebarWidth}
                 />
               )}
             </div>

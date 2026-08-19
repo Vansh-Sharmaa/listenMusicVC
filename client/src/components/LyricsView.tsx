@@ -1,19 +1,30 @@
+/**
+ * LyricsView.tsx
+ *
+ * Portions of the lyrics rendering and animation engine are adapted from:
+ * binimum/am-lyrics (https://github.com/binimum/am-lyrics)
+ * Copyright (c) 2024-2025 binimum
+ * Licensed under the Mozilla Public License 2.0 (MPL-2.0)
+ *
+ * Native React + TypeScript port for ListenMusicVC
+ */
+
 'use client';
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { fetchLyrics, LyricsData, LyricLine } from '../utils/lyrics';
-import { motion } from 'motion/react';
-import { Mic2, Loader2, Music2, Disc } from 'lucide-react';
 import { extractPaletteFromImage, SongColorPalette } from '../utils/colorExtractor';
+import { Mic2, Loader2, Music2, Disc, RotateCcw, Minus, Plus } from 'lucide-react';
 
-interface LyricsViewProps {
-  currentTrack: {
-    id: string;
+export interface LyricsViewProps {
+  currentTrack?: {
+    id?: string;
     title: string;
     artist: string;
-    duration?: number;
+    album?: string;
     thumbnail?: string;
-  } | null;
+    duration?: number;
+  };
   currentTime: number;
   getTime?: () => number;
   isPlaying: boolean;
@@ -21,9 +32,15 @@ interface LyricsViewProps {
   onSeek: (seconds: number) => void;
   onClose?: () => void;
   isFloating?: boolean;
+  sidebarWidth?: number;
+  onSetSidebarWidth?: (w: number) => void;
 }
 
-const SPRING_CFG = { type: 'spring', stiffness: 220, damping: 28, mass: 0.9 } as const;
+// Reference animation constants from binimum/am-lyrics
+const WIPE_GRADIENT_WIDTH_EM = 0.75;
+const CHAR_RISE_Y = '-1.12px';
+const WORD_PRE_WIPE_LEAD_SEC = 0.08;
+const SCROLL_SMOOTH_LAMBDA = 6.8; // Exponential camera settling rate matching cubic-bezier(0.41, 0, 0.12, 0.99)
 
 export const LyricsView: React.FC<LyricsViewProps> = ({
   currentTrack,
@@ -33,30 +50,66 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
   theme = 'dark',
   onSeek,
   onClose,
-  isFloating = false,
+  sidebarWidth,
+  onSetSidebarWidth,
 }) => {
   const isLight = theme === 'light';
-  const [lyrics, setLyrics] = useState<LyricsData | null>(null);
+  const [lyricsData, setLyricsData] = useState<LyricsData | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
-  const [activeLineIndex, setActiveLineIndex] = useState<number>(-1);
-  const [userIsScrolling, setUserIsScrolling] = useState<boolean>(false);
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const lyricsRef = useRef<LyricsData | null>(null);
-  const activeLineIndexRef = useRef<number>(-1);
+  const [syncOffset, setSyncOffset] = useState<number>(0.0);
   const [songPalette, setSongPalette] = useState<SongColorPalette | null>(null);
 
-  // Word span refs: wordSpanRefs[lineIndex][wordIndex] -> HTMLSpanElement
-  const wordSpanRefs = useRef<HTMLSpanElement[][]>([]);
+  // High-precision clock extrapolation
+  const lastAuthoritativeTimeRef = useRef<{ time: number; perfNow: number }>({
+    time: 0,
+    perfNow: performance.now(),
+  });
+  const isPlayingRef = useRef<boolean>(isPlaying);
+  const getTimeRef = useRef<(() => number) | undefined>(getTime);
+  const syncOffsetRef = useRef<number>(0.0);
+  const isLightRef = useRef<boolean>(isLight);
+
+  // DOM and geometry references
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const wordRefs = useRef<(HTMLSpanElement | null)[][]>([]);
+  const cleanLinesRef = useRef<LyricLine[]>([]);
+
+  const geometryCacheRef = useRef<{ lineTops: number[]; lineHeights: number[]; containerHeight: number }>({
+    lineTops: [],
+    lineHeights: [],
+    containerHeight: 0,
+  });
+
+  // Continuous Camera State
+  const scrollStateRef = useRef<{ currentY: number; targetY: number; isUserScrolling: boolean }>({
+    currentY: 0,
+    targetY: 0,
+    isUserScrolling: false,
+  });
+  const userScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const activeLineIndexRef = useRef<number>(-1);
   const rafRef = useRef<number | null>(null);
-  const isLightRef = useRef(isLight);
+  const lastFrameTimeRef = useRef<number>(performance.now());
+
+  // Keep state refs in sync
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  useEffect(() => { getTimeRef.current = getTime; }, [getTime]);
+  useEffect(() => { syncOffsetRef.current = syncOffset; }, [syncOffset]);
   useEffect(() => { isLightRef.current = isLight; }, [isLight]);
 
-  // Extract song palette colors for fluid dynamic ambient backdrop
+  // Update clock on authoritative currentTime prop change
+  useEffect(() => {
+    lastAuthoritativeTimeRef.current = {
+      time: currentTime,
+      perfNow: performance.now(),
+    };
+  }, [currentTime]);
+
+  // Extract song album art palette for Apple Music fluid ambient backdrop
   useEffect(() => {
     if (currentTrack?.thumbnail) {
-      extractPaletteFromImage(currentTrack.thumbnail).then(palette => {
+      extractPaletteFromImage(currentTrack.thumbnail).then((palette) => {
         setSongPalette(palette);
       });
     } else {
@@ -64,113 +117,281 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
     }
   }, [currentTrack?.thumbnail]);
 
-  // 1. Fetch lyrics
+  // Fetch lyrics
   useEffect(() => {
-    if (!currentTrack?.title) { setLyrics(null); lyricsRef.current = null; return; }
+    if (!currentTrack?.title) {
+      setLyricsData(null);
+      return;
+    }
     let isMounted = true;
     setLoading(true);
-    setActiveLineIndex(-1);
-    activeLineIndexRef.current = -1;
     fetchLyrics(currentTrack.title, currentTrack.artist, currentTrack.duration)
       .then((data) => {
         if (isMounted) {
-          setLyrics(data);
-          lyricsRef.current = data;
+          setLyricsData(data);
           setLoading(false);
-          wordSpanRefs.current = [];
+          lineRefs.current = [];
+          wordRefs.current = [];
+          activeLineIndexRef.current = -1;
         }
       })
-      .catch(() => { if (isMounted) setLoading(false); });
+      .catch(() => {
+        if (isMounted) setLoading(false);
+      });
     return () => { isMounted = false; };
   }, [currentTrack?.title, currentTrack?.artist]);
 
-  // 2. Active line tracking via React state (for scroll & structure re-render only)
-  useEffect(() => {
-    if (!lyrics || !lyrics.lines.length) return;
-    let currentIndex = -1;
-    for (let i = 0; i < lyrics.lines.length; i++) {
-      if (currentTime >= lyrics.lines[i].time) { currentIndex = i; } else { break; }
+  // Clean lines: filter translation lines and deduplicate
+  const cleanLines: LyricLine[] = useMemo(() => {
+    if (!lyricsData?.lines) return [];
+    const result: LyricLine[] = [];
+    const seen = new Set<string>();
+    for (const line of lyricsData.lines) {
+      const t = line.text.trim();
+      if (!t) continue;
+      if (/[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/.test(t)) continue;
+      const lower = t.toLowerCase();
+      if (seen.has(lower) && result.length > 0 && result[result.length - 1].text.toLowerCase() === lower) continue;
+      seen.add(lower);
+      result.push(line);
     }
-    if (currentIndex !== activeLineIndex) {
-      setActiveLineIndex(currentIndex);
-      activeLineIndexRef.current = currentIndex;
-    }
-  }, [currentTime, lyrics]);
+    cleanLinesRef.current = result;
+    return result;
+  }, [lyricsData]);
 
-  // 3. Smooth auto-scroll to center the active line
-  useEffect(() => {
-    if (userIsScrolling || activeLineIndex < 0) return;
-    const el = lineRefs.current[activeLineIndex];
-    if (el && containerRef.current) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }, [activeLineIndex, userIsScrolling]);
+  // Measure and cache layout geometry
+  const updateGeometryCache = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
 
-  const handleScroll = useCallback(() => {
-    setUserIsScrolling(true);
-    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-    scrollTimeoutRef.current = setTimeout(() => setUserIsScrolling(false), 2800);
+    const containerHeight = container.clientHeight;
+    const lines = cleanLinesRef.current;
+    const lineTops: number[] = [];
+    const lineHeights: number[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const el = lineRefs.current[i];
+      if (el) {
+        lineTops.push(el.offsetTop);
+        lineHeights.push(el.offsetHeight);
+      } else {
+        lineTops.push(0);
+        lineHeights.push(48);
+      }
+    }
+
+    geometryCacheRef.current = { lineTops, lineHeights, containerHeight };
   }, []);
 
-  // 4. THE CORE: 60fps RAF loop that directly paints word glow via DOM style
-  //    Zero React re-renders. Pure DOM mutation for buttery smoothness.
+  // Reset scroll and line index on new lyrics loaded
   useEffect(() => {
-    const paint = () => {
-      const lyricData = lyricsRef.current;
-      const activeIdx = activeLineIndexRef.current;
+    scrollStateRef.current.currentY = 0;
+    scrollStateRef.current.targetY = 0;
+    activeLineIndexRef.current = -1;
+    if (containerRef.current) {
+      containerRef.current.scrollTop = 0;
+    }
+  }, [cleanLines]);
+
+  // Update geometry on lyrics load, window resize, or container width change (sidebar slide/extend)
+  useEffect(() => {
+    const timer = setTimeout(updateGeometryCache, 40);
+    window.addEventListener('resize', updateGeometryCache);
+
+    let ro: ResizeObserver | null = null;
+    if (containerRef.current && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => {
+        updateGeometryCache();
+      });
+      ro.observe(containerRef.current);
+    }
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', updateGeometryCache);
+      if (ro) ro.disconnect();
+    };
+  }, [cleanLines, updateGeometryCache]);
+
+  // ─── Single Unified High-Resolution RAF Loop (am-lyrics Engine) ───────────
+  useEffect(() => {
+    const paint = (frameTime: number) => {
+      const dt = Math.min(0.08, Math.max(0.001, (frameTime - lastFrameTimeRef.current) / 1000));
+      lastFrameTimeRef.current = frameTime;
+
+      const lines = cleanLinesRef.current;
       const light = isLightRef.current;
+      const offset = syncOffsetRef.current;
 
-      if (lyricData && activeIdx >= 0) {
-        const line = lyricData.lines[activeIdx];
-        const nextLine = lyricData.lines[activeIdx + 1];
-        const nowSecs = getTime ? getTime() : currentTime;
+      // 1. High-Resolution Audio Clock (Sub-Frame Interpolated)
+      let nowSecs: number;
+      if (getTimeRef.current) {
+        nowSecs = getTimeRef.current() + offset;
+      } else {
+        const { time, perfNow } = lastAuthoritativeTimeRef.current;
+        const elapsed = isPlayingRef.current ? (frameTime - perfNow) / 1000 : 0;
+        nowSecs = time + elapsed + offset;
+      }
 
-        const lineDuration = nextLine ? Math.max(1.2, nextLine.time - line.time) : 4.0;
-        const elapsed = Math.max(0, nowSecs - line.time);
-        const wordSpans = wordSpanRefs.current[activeIdx];
+      if (!lines.length) {
+        rafRef.current = requestAnimationFrame(paint);
+        return;
+      }
 
-        if (wordSpans && wordSpans.length > 0) {
-          const totalWords = wordSpans.length;
-          // rawProgress goes from 0 → totalWords over the line duration
-          const rawProgress = Math.min(totalWords, (elapsed / lineDuration) * (totalWords + 0.5));
+      // 2. Active Line Index Lookup & Smooth Sweet-Spot Centering
+      let cur = -1;
+      for (let i = 0; i < lines.length; i++) {
+        if (nowSecs >= lines[i].time) {
+          cur = i;
+        } else {
+          break;
+        }
+      }
 
-          for (let i = 0; i < totalWords; i++) {
-            const span = wordSpans[i];
-            if (!span) continue;
-            const progress = rawProgress - i; // 0=future, 0-1=current, >1=past
-            const isFullyLit = progress >= 1;
-            const isCurrentWord = progress > 0 && progress < 1;
-            const p = Math.max(0, Math.min(1, progress));
+      const { lineTops, lineHeights, containerHeight } = geometryCacheRef.current;
+      const prev = activeLineIndexRef.current;
+      const activeLineChanged = cur !== prev;
 
-            if (light) {
-              if (isFullyLit) {
-                span.style.color = 'rgba(0,0,0,0.96)';
-                span.style.textShadow = '0 0 12px rgba(0,0,0,0.45)';
-                span.style.transform = 'scale(1.025)';
-              } else if (isCurrentWord) {
-                span.style.color = `rgba(0,0,0,${0.28 + p * 0.68})`;
-                span.style.textShadow = `0 0 ${4 + p * 10}px rgba(0,0,0,${0.08 + p * 0.37})`;
-                span.style.transform = `scale(${1.0 + p * 0.025})`;
-              } else {
-                span.style.color = 'rgba(0,0,0,0.28)';
-                span.style.textShadow = 'none';
-                span.style.transform = 'scale(1.0)';
-              }
+      // 3. Smooth Apple Music Center Focus on Active Line Change
+      if (activeLineChanged) {
+        activeLineIndexRef.current = cur;
+
+        if (cur >= 0 && containerHeight > 0 && lineTops[cur] !== undefined) {
+          // Center active line at ~32% viewport height (Apple Music sweet spot)
+          const targetFocusY = containerHeight * 0.32;
+          scrollStateRef.current.targetY = Math.max(0, (lineTops[cur] || 0) - targetFocusY + (lineHeights[cur] || 48) / 2);
+        } else {
+          scrollStateRef.current.targetY = 0;
+        }
+
+        // Apply smooth depth classes (with CSS transition for organic 0.7s fluid pull & glide)
+        for (let i = 0; i < lines.length; i++) {
+          const lineEl = lineRefs.current[i];
+          if (!lineEl) continue;
+
+          if (cur === -1) {
+            if (i === 0) {
+              lineEl.style.opacity = '0.75';
+              lineEl.style.transform = 'scale(1.0) translate3d(0, 0, 0)';
+              lineEl.style.filter = 'none';
+            } else if (i === 1) {
+              lineEl.style.opacity = '0.45';
+              lineEl.style.transform = 'scale(0.98) translate3d(0, 3px, 0)';
+              lineEl.style.filter = 'blur(1.5px)';
             } else {
-              if (isFullyLit) {
-                span.style.color = 'rgba(255,255,255,0.98)';
-                span.style.textShadow = '0 0 20px rgba(255,255,255,0.9), 0 0 38px rgba(255,255,255,0.4)';
-                span.style.transform = 'scale(1.03)';
-              } else if (isCurrentWord) {
-                span.style.color = `rgba(255,255,255,${0.26 + p * 0.72})`;
-                span.style.textShadow = `0 0 ${5 + p * 22}px rgba(255,255,255,${0.08 + p * 0.82})`;
-                span.style.transform = `scale(${1.0 + p * 0.03})`;
-              } else {
-                span.style.color = 'rgba(255,255,255,0.26)';
-                span.style.textShadow = 'none';
-                span.style.transform = 'scale(1.0)';
-              }
+              lineEl.style.opacity = '0.18';
+              lineEl.style.transform = 'scale(0.95) translate3d(0, 6px, 0)';
+              lineEl.style.filter = 'blur(3.5px)';
             }
+            continue;
+          }
+
+          const dist = i - cur;
+          if (dist === 0) {
+            // Active line: prominent, sharp, and focused
+            lineEl.style.opacity = '1';
+            lineEl.style.transform = 'scale(1.02) translate3d(0, 0, 0)';
+            lineEl.style.filter = 'none';
+          } else if (dist === -1) {
+            // Immediately previous line (pulled upward)
+            lineEl.style.opacity = '0.50';
+            lineEl.style.transform = 'scale(0.98) translate3d(0, -3px, 0)';
+            lineEl.style.filter = 'blur(1.2px)';
+          } else if (dist === 1) {
+            // Next incoming line (gliding upward from bottom)
+            lineEl.style.opacity = '0.50';
+            lineEl.style.transform = 'scale(0.98) translate3d(0, 3px, 0)';
+            lineEl.style.filter = 'blur(1.2px)';
+          } else if (dist === 2) {
+            lineEl.style.opacity = '0.28';
+            lineEl.style.transform = 'scale(0.96) translate3d(0, 6px, 0)';
+            lineEl.style.filter = 'blur(2.8px)';
+          } else {
+            lineEl.style.opacity = '0.14';
+            lineEl.style.transform = `scale(0.94) translate3d(0, ${dist > 0 ? '9px' : '-6px'}, 0)`;
+            lineEl.style.filter = 'blur(4px)';
+          }
+        }
+      }
+
+      // 4. Frame-Rate Independent Exponential Camera Lerp (Silky Pull & Gliding Physics)
+      const container = containerRef.current;
+      if (container && !scrollStateRef.current.isUserScrolling) {
+        const { targetY } = scrollStateRef.current;
+        let { currentY } = scrollStateRef.current;
+
+        // alpha = 1 - e^(-lambda * dt) (lambda = 4.6 for Apple Music elastic pull sensation)
+        const alpha = 1 - Math.exp(-4.6 * dt);
+        currentY += (targetY - currentY) * alpha;
+
+        if (Math.abs(targetY - currentY) < 0.2) {
+          currentY = targetY;
+        }
+
+        scrollStateRef.current.currentY = currentY;
+        container.scrollTop = currentY;
+      }
+
+      // 5. am-lyrics Background-Size Wipe Highlight Formula
+      const primaryColor = light ? '#000000' : '#ffffff';
+      const secondaryColor = light ? 'rgba(0,0,0,0.30)' : 'rgba(255,255,255,0.30)';
+
+      if (cur >= 0 && cur < lines.length) {
+        const line = lines[cur];
+        const words = line.words || [];
+        const wSpans = wordRefs.current[cur] || [];
+
+        for (let wIdx = 0; wIdx < words.length; wIdx++) {
+          const w = words[wIdx];
+          const span = wSpans[wIdx];
+          if (!span) continue;
+
+          const preWipeStart = w.startTime - WORD_PRE_WIPE_LEAD_SEC;
+
+          if (nowSecs < preWipeStart) {
+            // Future word: dim secondary color
+            span.style.background = 'none';
+            span.style.backgroundColor = secondaryColor;
+            (span.style as any).webkitBackgroundClip = 'text';
+            span.style.backgroundClip = 'text';
+            (span.style as any).webkitTextFillColor = 'transparent';
+            span.style.fontWeight = '700';
+            span.style.transform = 'translate3d(0, 0, 0)';
+            span.style.filter = 'none';
+          } else if (nowSecs >= w.endTime) {
+            // Finished word: solid primary color + settled transform
+            span.style.background = 'none';
+            span.style.backgroundColor = primaryColor;
+            (span.style as any).webkitBackgroundClip = 'text';
+            span.style.backgroundClip = 'text';
+            (span.style as any).webkitTextFillColor = 'transparent';
+            span.style.fontWeight = '800';
+            span.style.transform = `translate3d(0, ${CHAR_RISE_Y}, 0)`;
+            span.style.filter = 'none';
+          } else {
+            // Active wiping word: am-lyrics linear-gradient wipe formula
+            const wordDuration = Math.max(0.05, w.endTime - w.startTime);
+            const rawProgress = Math.max(0, Math.min(1, (nowSecs - w.startTime) / wordDuration));
+
+            // Human easeInOut
+            const progress = rawProgress < 0.5
+              ? 2 * rawProgress * rawProgress
+              : -1 + (4 - 2 * rawProgress) * rawProgress;
+
+            // am-lyrics formula: background-size expands from 0% to (100% + wipeGradientWidth)
+            const wipeSizePct = Math.min(100, Math.max(0, progress * 100));
+
+            span.style.backgroundColor = secondaryColor;
+            span.style.backgroundImage = `linear-gradient(90deg, ${primaryColor} 0%, ${primaryColor} calc(100% - ${WIPE_GRADIENT_WIDTH_EM}em), transparent 100%)`;
+            span.style.backgroundRepeat = 'no-repeat';
+            span.style.backgroundPosition = 'left';
+            span.style.backgroundSize = `${wipeSizePct}% 100%`;
+            (span.style as any).webkitBackgroundClip = 'text';
+            span.style.backgroundClip = 'text';
+            (span.style as any).webkitTextFillColor = 'transparent';
+            span.style.fontWeight = '800';
+            span.style.transform = `translate3d(0, ${CHAR_RISE_Y}, 0)`;
+            span.style.filter = 'none';
           }
         }
       }
@@ -179,164 +400,239 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
     };
 
     rafRef.current = requestAnimationFrame(paint);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [getTime]); // only re-subscribe if getTime changes
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
+  // Handle explicit user gesture scrolling (wheel / touch) without getting tripped by programmatic RAF scroll
+  const handleUserInteractionStart = useCallback(() => {
+    scrollStateRef.current.isUserScrolling = true;
+
+    if (userScrollTimeoutRef.current) clearTimeout(userScrollTimeoutRef.current);
+    userScrollTimeoutRef.current = setTimeout(() => {
+      scrollStateRef.current.isUserScrolling = false;
+      const cur = activeLineIndexRef.current;
+      const { lineTops, lineHeights, containerHeight } = geometryCacheRef.current;
+      if (cur >= 0 && lineTops[cur] !== undefined && containerHeight > 0) {
+        const targetFocusY = containerHeight * 0.38;
+        scrollStateRef.current.targetY = Math.max(0, (lineTops[cur] || 0) - targetFocusY + (lineHeights[cur] || 48) / 2);
+      }
+    }, 2400);
+  }, []);
 
   if (!currentTrack) {
     return (
       <div className={`h-full flex flex-col items-center justify-center p-6 text-center select-none ${isLight ? 'text-black/40' : 'text-white/40'}`}>
         <Disc size={36} className="animate-spin opacity-40 mb-3" />
         <p className="text-sm font-medium">No track playing</p>
-        <p className="text-xs opacity-70 mt-1">Play any song to view real-time synchronized lyrics</p>
+        <p className="text-xs opacity-70 mt-1">Play any song to view synchronized lyrics</p>
       </div>
     );
   }
 
   return (
-    <div className={`flex flex-col h-full w-full relative overflow-hidden select-none transition-colors duration-500 ${isLight ? 'bg-white text-black' : 'bg-black/35 text-white'}`}>
-      
-      {/* Dynamic Fluid Backdrop Mesh (Apple Music style) */}
-      <div 
-        className="absolute inset-0 z-0 pointer-events-none opacity-40 transition-all duration-1000"
+    <div className={`flex flex-col h-full w-full relative overflow-hidden select-none transition-colors duration-500 ${isLight ? 'bg-white text-black' : 'bg-[#0e0e11] text-white'}`}>
+
+      {/* Dynamic Ambient Album Backdrop */}
+      <div
+        className="absolute inset-0 z-0 pointer-events-none opacity-25 transition-all duration-1000 blur-3xl scale-125"
         style={{
           background: songPalette
-            ? `radial-gradient(circle at 15% 20%, ${songPalette.primary}, transparent 55%), radial-gradient(circle at 85% 80%, ${songPalette.secondary}, transparent 55%), radial-gradient(circle at 50% 50%, ${songPalette.darkMuted}, transparent 75%)`
+            ? `radial-gradient(circle at 25% 25%, ${songPalette.primary}, transparent 60%), radial-gradient(circle at 75% 75%, ${songPalette.secondary}, transparent 60%), radial-gradient(circle at 50% 50%, ${songPalette.darkMuted}, transparent 80%)`
             : undefined
         }}
       />
-      {currentTrack?.thumbnail && (
-        <div 
-          className="absolute inset-0 z-0 bg-cover bg-center pointer-events-none opacity-20 mix-blend-screen transition-all duration-1000"
-          style={{ 
-            backgroundImage: `url(${currentTrack.thumbnail})`,
-            filter: 'blur(90px) saturate(140%) brightness(0.7)',
-            transform: 'scale(1.15)'
-          }} 
-        />
-      )}
 
-      {/* Header */}
-      <div className={`p-4 border-b flex items-center justify-between z-10 backdrop-blur-2xl ${isLight ? 'bg-white/40 border-black/5' : 'bg-black/30 border-white/5'}`}>
+      {/* Header with Sync Offset controls */}
+      <div className={`px-4 py-3.5 border-b flex items-center justify-between z-20 backdrop-blur-2xl ${isLight ? 'bg-white/80 border-black/5' : 'bg-black/40 border-white/10'}`}>
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="p-1.5 rounded-lg bg-fuchsia-500/20 text-fuchsia-400 shadow-inner">
+          <div className="p-1.5 rounded-lg bg-fuchsia-500/20 text-fuchsia-400">
             <Mic2 size={16} />
           </div>
           <div className="flex flex-col min-w-0">
             <span className="text-xs font-bold tracking-wide flex items-center gap-1.5">
               <span>Apple Music Lyrics</span>
-              <span className="h-1.5 w-1.5 rounded-full bg-fuchsia-400 animate-ping" />
+              <span className={`h-1.5 w-1.5 rounded-full ${isPlaying ? 'bg-fuchsia-400 animate-pulse' : 'bg-white/30'}`} />
             </span>
             <span className={`text-[10px] truncate ${isLight ? 'text-black/50' : 'text-white/50'}`}>
               {currentTrack.title} • {currentTrack.artist}
             </span>
           </div>
         </div>
-        {onClose && (
-          <button
-            onClick={onClose}
-            className={`p-1.5 rounded-full text-xs font-semibold px-3 transition-all active:scale-95 ${isLight ? 'bg-black/5 hover:bg-black/10 text-black/70' : 'bg-white/10 hover:bg-white/20 text-white/80'}`}
-          >✕</button>
-        )}
+
+        {/* Controls Container */}
+        <div className="flex items-center gap-1.5">
+          {/* Quick Width Snap Presets */}
+          {onSetSidebarWidth && (
+            <div className="hidden sm:flex items-center gap-0.5 bg-white/10 border border-white/10 rounded-full p-0.5 text-[10px] font-bold">
+              <button
+                onClick={() => onSetSidebarWidth(380)}
+                className={`px-2 py-0.5 rounded-full transition-all active:scale-95 ${sidebarWidth && sidebarWidth < 460 ? 'bg-fuchsia-600 text-white shadow-sm' : 'text-white/60 hover:text-white'}`}
+                title="Compact Width (380px)"
+              >
+                380
+              </button>
+              <button
+                onClick={() => onSetSidebarWidth(540)}
+                className={`px-2 py-0.5 rounded-full transition-all active:scale-95 ${sidebarWidth && sidebarWidth >= 460 && sidebarWidth < 680 ? 'bg-fuchsia-600 text-white shadow-sm' : 'text-white/60 hover:text-white'}`}
+                title="Expanded Width (540px)"
+              >
+                540
+              </button>
+              <button
+                onClick={() => onSetSidebarWidth(760)}
+                className={`px-2 py-0.5 rounded-full transition-all active:scale-95 ${sidebarWidth && sidebarWidth >= 680 ? 'bg-fuchsia-600 text-white shadow-sm' : 'text-white/60 hover:text-white'}`}
+                title="Cinema Wide (760px)"
+              >
+                760
+              </button>
+            </div>
+          )}
+
+          {/* Sync Offset Controls */}
+          <div className="flex items-center gap-1 bg-white/10 border border-white/10 rounded-full px-2 py-0.5 text-xs">
+            <button
+              onClick={() => setSyncOffset(p => Math.round((p - 0.5) * 10) / 10)}
+              className="p-1 hover:text-fuchsia-400 transition-colors active:scale-90"
+              title="Nudge Lyrics 0.5s Earlier"
+            >
+              <Minus size={11} />
+            </button>
+            <span className="font-mono font-bold text-[11px] min-w-[38px] text-center text-white/80">
+              {syncOffset >= 0 ? `+${syncOffset.toFixed(1)}s` : `${syncOffset.toFixed(1)}s`}
+            </span>
+            <button
+              onClick={() => setSyncOffset(p => Math.round((p + 0.5) * 10) / 10)}
+              className="p-1 hover:text-fuchsia-400 transition-colors active:scale-90"
+              title="Nudge Lyrics 0.5s Later"
+            >
+              <Plus size={11} />
+            </button>
+            {syncOffset !== 0 && (
+              <button
+                onClick={() => setSyncOffset(0)}
+                className="p-1 hover:text-amber-400 transition-colors active:scale-90 ml-0.5 text-white/50"
+                title="Reset Sync Offset"
+              >
+                <RotateCcw size={10} />
+              </button>
+            )}
+          </div>
+
+          {onClose && (
+            <button
+              onClick={onClose}
+              className={`w-7 h-7 flex items-center justify-center rounded-full text-xs font-semibold transition-all active:scale-90 ${isLight ? 'bg-black/5 hover:bg-black/10 text-black/70' : 'bg-white/10 hover:bg-white/20 text-white/80'}`}
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Lyrics body (with top/bottom gradient fade masks) */}
+      {/* Lyrics Scroll Body */}
       <div
         ref={containerRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 md:px-8 py-16 space-y-6 scrollbar-none relative z-10"
-        style={{ 
-          scrollBehavior: 'smooth',
-          maskImage: 'linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%)',
-          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%)'
+        onWheel={handleUserInteractionStart}
+        onTouchStart={handleUserInteractionStart}
+        onTouchMove={handleUserInteractionStart}
+        className="flex-1 overflow-y-auto px-6 md:px-12 scrollbar-none relative z-10"
+        style={{
+          maskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 12%, rgba(0,0,0,1) 86%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 12%, rgba(0,0,0,1) 86%, transparent 100%)'
         }}
       >
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-24 gap-3 opacity-60">
+          <div className="flex flex-col items-center justify-center py-32 gap-3 opacity-60">
             <Loader2 size={28} className="animate-spin text-fuchsia-500" />
-            <span className="text-xs font-medium tracking-wide">Syncing real-time lyrics...</span>
+            <span className="text-xs font-medium tracking-wide">Syncing Apple Music lyrics…</span>
           </div>
-        ) : !lyrics || !lyrics.lines.length ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center gap-3 opacity-50 px-4">
+        ) : !cleanLines.length ? (
+          <div className="flex flex-col items-center justify-center py-32 gap-3 opacity-40 text-center">
             <Music2 size={36} />
-            <span className="text-sm font-semibold">Lyrics not available for this song</span>
-            <span className="text-xs max-w-xs">Listen with your friends in synchronized high-fidelity audio!</span>
+            <span className="text-sm font-semibold">No lyrics found for this track</span>
           </div>
         ) : (
-          <>
-            <div className="h-32" />
-            {lyrics.lines.map((line: LyricLine, index: number) => {
-              const isActive = index === activeLineIndex;
-              const isPast = index < activeLineIndex;
-              // Split words for rendering - preserve spaces
-              const tokens = line.text.split(/(\s+)/);
-              const nonSpaceTokenIndices: number[] = [];
-              tokens.forEach((t, i) => { if (t.trim().length > 0) nonSpaceTokenIndices.push(i); });
+          <div className="pt-[28vh] pb-[52vh]">
+            {cleanLines.map((line, lineIndex) => {
+              const words = line.words || [{ text: line.text, startTime: line.time, endTime: line.endTime || line.time + 4 }];
+              if (!wordRefs.current[lineIndex]) {
+                wordRefs.current[lineIndex] = [];
+              }
 
               return (
                 <div
-                  key={`${line.time}-${index}`}
-                  ref={(el) => { lineRefs.current[index] = el; }}
-                  className="transition-all duration-500"
+                  key={`${line.time}-${lineIndex}`}
+                  ref={el => { lineRefs.current[lineIndex] = el; }}
+                  className="py-3.5 origin-left"
+                  style={{
+                    transition: 'opacity 0.7s cubic-bezier(0.25, 1, 0.5, 1), transform 0.7s cubic-bezier(0.25, 1, 0.5, 1), filter 0.7s ease',
+                    willChange: 'opacity, transform, filter'
+                  }}
                 >
-                  <motion.button
-                    onClick={() => onSeek(line.time)}
-                    animate={{
-                      opacity: isActive ? 1 : isPast ? 0.38 : 0.22,
-                      filter: isActive ? 'blur(0px)' : isPast ? 'blur(0.3px)' : 'blur(1.6px)',
-                      scale: isActive ? 1.04 : 0.96,
+                  <button
+                    onClick={() => {
+                      onSeek(line.time);
+                      lastAuthoritativeTimeRef.current = { time: line.time, perfNow: performance.now() };
+                      activeLineIndexRef.current = lineIndex;
+                      scrollStateRef.current.isUserScrolling = false;
+                      const { lineTops, lineHeights, containerHeight } = geometryCacheRef.current;
+                      if (lineTops[lineIndex] !== undefined && containerHeight > 0) {
+                        const targetFocusY = containerHeight * 0.38;
+                        scrollStateRef.current.targetY = Math.max(0, (lineTops[lineIndex] || 0) - targetFocusY + (lineHeights[lineIndex] || 48) / 2);
+                      }
                     }}
-                    transition={SPRING_CFG}
-                    className="w-full text-left relative py-2.5 px-4 rounded-[24px] focus:outline-none select-none group"
-                    style={{ transformOrigin: 'left center' }}
-                    whileHover={!isActive ? { opacity: 0.72, filter: 'blur(0px)', transition: { duration: 0.14 } } : undefined}
+                    className="w-full text-left focus:outline-none cursor-pointer group"
                   >
-                    <p className="text-xl sm:text-2xl md:text-3.5xl leading-relaxed tracking-tight font-black m-0 font-sans break-words whitespace-pre-wrap">
-                      {tokens.map((token, tIdx) => {
-                        if (token.trim().length === 0) {
-                          return <span key={tIdx}>{token}</span>;
-                        }
-                        const wordIdx = nonSpaceTokenIndices.indexOf(tIdx);
-                        return (
-                          <span
-                            key={tIdx}
-                            ref={(el) => {
-                              if (isActive && el) {
-                                if (!wordSpanRefs.current[index]) wordSpanRefs.current[index] = [];
-                                wordSpanRefs.current[index][wordIdx] = el;
-                              }
-                            }}
-                            className="inline-block transition-transform duration-300"
-                            style={{
-                              // Initial color based on line state; RAF will override for active line
-                              color: isActive
-                                ? (isLight ? 'rgba(0,0,0,0.28)' : 'rgba(255,255,255,0.26)')
-                                : isPast
-                                ? (isLight ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)')
-                                : (isLight ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.4)'),
-                            }}
-                          >
-                            {token}
-                          </span>
-                        );
-                      })}
+                    <p
+                      className="text-xl sm:text-2xl md:text-[2.1rem] leading-[1.32] tracking-[-0.025em] m-0 break-words"
+                      style={{
+                        fontFamily: "var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+                        color: isLight ? 'rgba(0,0,0,0.30)' : 'rgba(255,255,255,0.30)',
+                      }}
+                    >
+                      {words.map((w, wIdx) => (
+                        <span
+                          key={`${w.startTime}-${wIdx}`}
+                          ref={el => { wordRefs.current[lineIndex][wIdx] = el; }}
+                          className="inline-block mr-[0.28em] transition-transform duration-300"
+                          style={{
+                            fontWeight: 700,
+                            color: 'transparent',
+                            backgroundColor: isLight ? 'rgba(0,0,0,0.30)' : 'rgba(255,255,255,0.30)',
+                            WebkitBackgroundClip: 'text',
+                            backgroundClip: 'text',
+                          }}
+                        >
+                          {w.text}
+                        </span>
+                      ))}
                     </p>
-                  </motion.button>
+                  </button>
                 </div>
               );
             })}
-            <div className="h-48" />
-          </>
+          </div>
         )}
       </div>
 
-      {/* Footer */}
-      {lyrics && lyrics.synced && (
-        <div className={`p-3 px-4 text-center border-t text-[10px] tracking-widest font-bold uppercase flex items-center justify-center gap-2 backdrop-blur-2xl relative z-10 ${isLight ? 'bg-white/30 border-black/5 text-black/30' : 'bg-black/30 border-white/5 text-white/25'}`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${isPlaying ? 'bg-fuchsia-400 animate-pulse' : 'bg-white/30'}`} />
-          <span>Real-time synced</span>
-          <span className={`h-1.5 w-1.5 rounded-full ${isPlaying ? 'bg-fuchsia-400 animate-pulse' : 'bg-white/30'}`} />
+      {lyricsData?.synced && (
+        <div className={`py-2.5 px-4 text-center border-t text-[10px] tracking-widest font-bold uppercase flex items-center justify-center gap-2 backdrop-blur-2xl relative z-20 ${isLight ? 'bg-white/40 border-black/5 text-black/30' : 'bg-black/40 border-white/5 text-white/25'}`}>
+          <span className={`h-1.5 w-1.5 rounded-full ${isPlaying ? 'bg-fuchsia-400 animate-pulse' : 'opacity-30 bg-current'}`} />
+          Apple Music Synced Engine
+          <span className={`h-1.5 w-1.5 rounded-full ${isPlaying ? 'bg-fuchsia-400 animate-pulse' : 'opacity-30 bg-current'}`} />
         </div>
       )}
     </div>
   );
 };
+
+
+
+
+
+
+
+
+

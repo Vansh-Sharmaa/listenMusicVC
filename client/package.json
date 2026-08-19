@@ -9,6 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@applemusic-like-lyrics/core": "^0.5.2",
+    "@applemusic-like-lyrics/lyric": "^1.0.2",
+    "@applemusic-like-lyrics/react": "^0.5.2",
     "@livekit/components-react": "^2.9.24",
     "@livekit/components-styles": "^1.2.0",
     "livekit-client": "^2.22.0",

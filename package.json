@@ -11,5 +11,8 @@
   },
   "devDependencies": {
     "concurrently": "^10.0.5"
+  },
+  "dependencies": {
+    "@uimaxbai/am-lyrics": "^1.5.6"
   }
 }
