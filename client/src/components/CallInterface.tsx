@@ -572,14 +572,21 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     setTimeout(() => { isLocalTriggeredRef.current = false; }, 500);
   };
 
-  // Permanent Shared Music Playback Synchronization (Ultra-Smooth YouTube + Direct Audio Engine)
+  const isProgrammaticActionRef = useRef<boolean>(false);
+  const lastSeekTimestampRef = useRef<number>(0);
+
+  // Synchronized YouTube Video & Audio Engine (Zero-Stuttering & Feedback-Protected)
   useEffect(() => {
     const audio = musicAudioRef.current;
 
     if (!musicState.currentTrackId && !musicState.currentTrack) {
       if (audio && !audio.paused) audio.pause();
       if (ytPlayerRef.current && ytPlayerReadyRef.current) {
-        try { ytPlayerRef.current.pauseVideo(); } catch (_) {}
+        try {
+          isProgrammaticActionRef.current = true;
+          ytPlayerRef.current.pauseVideo();
+          setTimeout(() => { isProgrammaticActionRef.current = false; }, 800);
+        } catch (_) {}
       }
       return;
     }
@@ -591,22 +598,16 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     // Fallback URL preset lookup if trackData wasn't attached
     if (!trackUrl && musicState.currentTrackId) {
       const presetList: Record<string, string> = {
-        'yt-desi-kalakaar': 'https://www.youtube.com/watch?v=KhnVcACZFek',
-        'yt-blue-eyes': 'https://www.youtube.com/watch?v=NbyHNASFi6U',
-        'yt-brown-rang': 'https://www.youtube.com/watch?v=kYx4jN5k2m8',
-        'yt-dope-shope': 'https://www.youtube.com/watch?v=RbaYp1Gf-t8',
+        'yt-the-weeknd-starboy': 'https://www.youtube.com/watch?v=34Na4j8AVgA',
+        'yt-the-weeknd-blinding': 'https://www.youtube.com/watch?v=4NRXx6U8ABQ',
         'yt-chase-atlantic-slide': 'https://www.youtube.com/watch?v=tOVIeLZtxDc',
         'yt-drake-massive': 'https://www.youtube.com/watch?v=ay1l_u6vltY',
         'yt-future-weeknd': 'https://www.youtube.com/watch?v=mq4wClhFmA8',
         'yt-tricksingh-taaj': 'https://www.youtube.com/watch?v=Du8E8g2LVoU',
-        'yt-the-weeknd-blinding': 'https://www.youtube.com/watch?v=4NRXx6U8ABQ',
         'yt-lofi-girl': 'https://www.youtube.com/watch?v=jfKfPfyJRdk',
         'online-1': 'https://ia802802.us.archive.org/5/items/lofi-study-112191/lofi-study-112191.mp3',
         'online-2': 'https://ia800905.us.archive.org/19/items/FREE_background_music_loops/chill_groove.mp3',
         'online-3': 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3',
-        'rf-1': 'https://ia802802.us.archive.org/5/items/lofi-study-112191/lofi-study-112191.mp3',
-        'rf-2': 'https://ia800905.us.archive.org/19/items/FREE_background_music_loops/chill_groove.mp3',
-        'rf-3': 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3',
       };
       trackUrl = presetList[musicState.currentTrackId] || '';
     }
@@ -641,6 +642,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       if (!ytPlayerRef.current) {
         if ((window as any).YT && (window as any).YT.Player) {
           try {
+            isProgrammaticActionRef.current = true;
             ytPlayerRef.current = new (window as any).YT.Player('youtube-sync-player', {
               height: '100%',
               width: '100%',
@@ -663,7 +665,6 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                   currentYtVideoIdRef.current = ytId;
                   event.target.setVolume(Math.max(0, Math.min(100, Math.round(musicVolume * 100))));
                   
-                  // Calculate dynamic exact position at the moment the player is ready (late-joiners fix)
                   const liveElapsed = musicState.isPlaying
                     ? (getServerTime() - Number(musicState.lastPositionUpdatedAt || Date.now())) / 1000
                     : 0;
@@ -677,27 +678,28 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                   } else {
                     event.target.pauseVideo();
                   }
+                  setTimeout(() => { isProgrammaticActionRef.current = false; }, 1000);
                 },
                 onStateChange: (event: any) => {
-                  if (isLocalTriggeredRef.current) return;
+                  // Guard: Ignore all state changes triggered programmatically or by sync seeks
+                  if (isProgrammaticActionRef.current || isLocalTriggeredRef.current) return;
 
                   // YT.PlayerState.PLAYING = 1, PAUSED = 2
                   if (event.data === 1 && !musicState.isPlaying) {
                     const curTime = event.target.getCurrentTime ? event.target.getCurrentTime() : 0;
                     isLocalTriggeredRef.current = true;
                     sendMusicAction('play', musicState.currentTrackId, curTime, musicState.currentTrack);
-                    setTimeout(() => { isLocalTriggeredRef.current = false; }, 600);
+                    setTimeout(() => { isLocalTriggeredRef.current = false; }, 800);
                   } else if (event.data === 2 && musicState.isPlaying) {
                     const curTime = event.target.getCurrentTime ? event.target.getCurrentTime() : 0;
                     isLocalTriggeredRef.current = true;
                     sendMusicAction('pause', musicState.currentTrackId, curTime, musicState.currentTrack);
-                    setTimeout(() => { isLocalTriggeredRef.current = false; }, 600);
+                    setTimeout(() => { isLocalTriggeredRef.current = false; }, 800);
                   }
                 },
                 onError: async (err: any) => {
                   console.warn('[YouTube Player] Error code:', err?.data);
                   if (err?.data === 101 || err?.data === 150 || err?.data === 2) {
-                    // Try auto-fallback to alternative audio version of this song
                     if (musicState.currentTrack?.title) {
                       try {
                         const serverUrl = (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '');
@@ -706,9 +708,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                           const results = await res.json();
                           const fallback = results.find((r: any) => r.id !== `yt-${ytId}`);
                           if (fallback) {
-                            console.log('[YouTube] Auto-switching to embeddable version:', fallback.title);
                             sendMusicAction('change', fallback.id, 0, fallback);
-                            sendMusicAction('play', fallback.id, 0, fallback);
                             return;
                           }
                         }
@@ -720,44 +720,47 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             });
           } catch (e) {
             console.warn('[YouTube] Player initialization error:', e);
+            isProgrammaticActionRef.current = false;
           }
         }
       } else if (ytPlayerReadyRef.current) {
         try {
-          // If track changed: load the new video at the authoritative synced position
+          // If track changed: load the new video once and seek
           if (currentYtVideoIdRef.current !== ytId) {
             currentYtVideoIdRef.current = ytId;
+            isProgrammaticActionRef.current = true;
             ytPlayerRef.current.loadVideoById({
               videoId: ytId,
               startSeconds: Math.floor(targetPos)
             });
+            setTimeout(() => { isProgrammaticActionRef.current = false; }, 1000);
           }
 
           ytPlayerRef.current.setVolume(Math.max(0, Math.min(100, Math.round(musicVolume * 100))));
 
-          // If this is a newly received authoritative state change event (e.g. seek or play/pause)
-          if (isNewVersion) {
-            ytPlayerRef.current.seekTo(targetPos, true);
-          }
-
           if (musicState.isPlaying) {
+            isProgrammaticActionRef.current = true;
             ytPlayerRef.current.playVideo();
-            if (ytPlayerRef.current.setPlaybackRate) {
-              ytPlayerRef.current.setPlaybackRate(1.0);
-            }
+            setTimeout(() => { isProgrammaticActionRef.current = false; }, 600);
 
             const currentPos = ytPlayerRef.current.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : 0;
-            const drift = targetPos - currentPos;
+            const drift = Math.abs(targetPos - currentPos);
+            const now = Date.now();
 
-            // Pure, distortion-free hard seek when drift exceeds 1 second
-            if (Math.abs(drift) > 1.0) {
+            // Only hard seek if drift is massive (> 3.5s) AND at least 4 seconds have passed since last seek
+            if (drift > 3.5 && (now - lastSeekTimestampRef.current > 4000)) {
+              lastSeekTimestampRef.current = now;
+              isProgrammaticActionRef.current = true;
               ytPlayerRef.current.seekTo(targetPos, true);
+              setTimeout(() => { isProgrammaticActionRef.current = false; }, 800);
             }
           } else {
+            isProgrammaticActionRef.current = true;
             ytPlayerRef.current.pauseVideo();
-            if (ytPlayerRef.current.setPlaybackRate) ytPlayerRef.current.setPlaybackRate(1.0);
+            setTimeout(() => { isProgrammaticActionRef.current = false; }, 600);
+            
             const currentPos = ytPlayerRef.current.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : 0;
-            if (musicState.lastPosition !== undefined && Math.abs(currentPos - musicState.lastPosition) > 0.5) {
+            if (musicState.lastPosition !== undefined && Math.abs(currentPos - musicState.lastPosition) > 1.5) {
               ytPlayerRef.current.seekTo(musicState.lastPosition, true);
             }
           }
