@@ -563,6 +563,10 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     // Fallback URL preset lookup if trackData wasn't attached
     if (!trackUrl && musicState.currentTrackId) {
       const presetList: Record<string, string> = {
+        'yt-desi-kalakaar': 'https://www.youtube.com/watch?v=KhnVcACZFek',
+        'yt-blue-eyes': 'https://www.youtube.com/watch?v=NbyHNASFi6U',
+        'yt-brown-rang': 'https://www.youtube.com/watch?v=kYx4jN5k2m8',
+        'yt-dope-shope': 'https://www.youtube.com/watch?v=RbaYp1Gf-t8',
         'yt-chase-atlantic-slide': 'https://www.youtube.com/watch?v=tOVIeLZtxDc',
         'yt-drake-massive': 'https://www.youtube.com/watch?v=ay1l_u6vltY',
         'yt-future-weeknd': 'https://www.youtube.com/watch?v=mq4wClhFmA8',

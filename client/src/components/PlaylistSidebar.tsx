@@ -49,6 +49,42 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
   // Curated list of popular hits & live online music streams
   const onlinePresetTracks: MusicTrack[] = [
     {
+      id: 'yt-desi-kalakaar',
+      title: 'Desi Kalakaar',
+      artist: 'Yo Yo Honey Singh',
+      url: 'https://www.youtube.com/watch?v=KhnVcACZFek',
+      duration: 253,
+      isRoyaltyFree: false,
+      thumbnail: 'https://img.youtube.com/vi/KhnVcACZFek/hqdefault.jpg'
+    },
+    {
+      id: 'yt-blue-eyes',
+      title: 'Blue Eyes',
+      artist: 'Yo Yo Honey Singh',
+      url: 'https://www.youtube.com/watch?v=NbyHNASFi6U',
+      duration: 220,
+      isRoyaltyFree: false,
+      thumbnail: 'https://img.youtube.com/vi/NbyHNASFi6U/hqdefault.jpg'
+    },
+    {
+      id: 'yt-brown-rang',
+      title: 'Brown Rang',
+      artist: 'Yo Yo Honey Singh',
+      url: 'https://www.youtube.com/watch?v=kYx4jN5k2m8',
+      duration: 180,
+      isRoyaltyFree: false,
+      thumbnail: 'https://img.youtube.com/vi/kYx4jN5k2m8/hqdefault.jpg'
+    },
+    {
+      id: 'yt-dope-shope',
+      title: 'Dope Shope',
+      artist: 'Yo Yo Honey Singh, Deep Money',
+      url: 'https://www.youtube.com/watch?v=RbaYp1Gf-t8',
+      duration: 190,
+      isRoyaltyFree: false,
+      thumbnail: 'https://img.youtube.com/vi/RbaYp1Gf-t8/hqdefault.jpg'
+    },
+    {
       id: 'yt-chase-atlantic-slide',
       title: 'SLIDE',
       artist: 'Chase Atlantic',
@@ -56,6 +92,15 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
       duration: 210,
       isRoyaltyFree: false,
       thumbnail: 'https://img.youtube.com/vi/tOVIeLZtxDc/hqdefault.jpg'
+    },
+    {
+      id: 'yt-the-weeknd-blinding',
+      title: 'Blinding Lights',
+      artist: 'The Weeknd',
+      url: 'https://www.youtube.com/watch?v=4NRXx6U8ABQ',
+      duration: 200,
+      isRoyaltyFree: false,
+      thumbnail: 'https://img.youtube.com/vi/4NRXx6U8ABQ/hqdefault.jpg'
     },
     {
       id: 'yt-drake-massive',
@@ -83,15 +128,6 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
       duration: 198,
       isRoyaltyFree: false,
       thumbnail: 'https://img.youtube.com/vi/Du8E8g2LVoU/hqdefault.jpg'
-    },
-    {
-      id: 'yt-the-weeknd-blinding',
-      title: 'Blinding Lights',
-      artist: 'The Weeknd',
-      url: 'https://www.youtube.com/watch?v=4NRXx6U8ABQ',
-      duration: 200,
-      isRoyaltyFree: false,
-      thumbnail: 'https://img.youtube.com/vi/4NRXx6U8ABQ/hqdefault.jpg'
     },
     {
       id: 'yt-lofi-girl',
