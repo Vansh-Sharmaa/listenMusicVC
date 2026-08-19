@@ -7,7 +7,7 @@ import { ChatSidebar } from './ChatSidebar';
 import { PlaylistSidebar } from './PlaylistSidebar';
 import { AudioMixerPanel } from './AudioMixerPanel';
 import { ReactionOverlay } from './ReactionOverlay';
-import { extractYouTubeId, isYouTubeUrl } from '../utils/youtube';
+import { extractYouTubeId, isYouTubeUrl, extractSpotifyInfo, extractSoundCloudInfo, parseMediaUrl } from '../utils/mediaPlatform';
 import {
   Mic,
   MicOff,
@@ -1436,25 +1436,54 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             </div>
           )}
 
-          {/* YouTube Video Player Overlay / Background Audio Element */}
-          <div
-            className={`absolute bottom-20 md:bottom-24 right-3 md:right-6 z-30 transition-all duration-300 rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-black ${
-              isYouTubeUrl(musicState.currentTrack?.url || '')
-                ? showYtVideo
-                  ? 'w-48 sm:w-72 md:w-80 aspect-video block'
-                  : 'w-1 h-1 opacity-0 pointer-events-none'
-                : 'hidden'
-            }`}
-          >
-            <div id="youtube-sync-player" className="w-full h-full" />
-            <button
-              onClick={() => setShowYtVideo(!showYtVideo)}
-              className="absolute top-1.5 right-1.5 md:top-2 md:right-2 bg-black/70 hover:bg-black/90 text-white/80 hover:text-white p-1 rounded-full text-xs z-40 backdrop-blur-sm border border-white/10"
-              title={showYtVideo ? "Hide Music Video" : "Show Music Video"}
+          {/* Multi-Platform Player Overlay (YouTube, Spotify, SoundCloud, Web Audio) */}
+          {musicState.currentTrack && (
+            <div
+              className={`absolute bottom-20 md:bottom-24 right-3 md:right-6 z-30 transition-all duration-300 rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-black ${
+                showYtVideo ? 'w-64 sm:w-80 md:w-96 aspect-video block' : 'w-1 h-1 opacity-0 pointer-events-none'
+              }`}
             >
-              {showYtVideo ? <EyeOff size={13} /> : <Eye size={13} />}
-            </button>
-          </div>
+              {/* YouTube Container */}
+              <div
+                id="youtube-sync-player"
+                className={`w-full h-full ${isYouTubeUrl(musicState.currentTrack.url) ? 'block' : 'hidden'}`}
+              />
+
+              {/* Spotify Embed Widget */}
+              {extractSpotifyInfo(musicState.currentTrack.url) && (
+                <iframe
+                  src={extractSpotifyInfo(musicState.currentTrack.url)?.embedUrl}
+                  width="100%"
+                  height="100%"
+                  frameBorder="0"
+                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                  loading="lazy"
+                  className="w-full h-full rounded-2xl"
+                />
+              )}
+
+              {/* SoundCloud Embed Widget */}
+              {extractSoundCloudInfo(musicState.currentTrack.url) && (
+                <iframe
+                  src={extractSoundCloudInfo(musicState.currentTrack.url)?.embedUrl}
+                  width="100%"
+                  height="100%"
+                  scrolling="no"
+                  frameBorder="no"
+                  allow="autoplay"
+                  className="w-full h-full rounded-2xl"
+                />
+              )}
+
+              <button
+                onClick={() => setShowYtVideo(!showYtVideo)}
+                className="absolute top-1.5 right-1.5 md:top-2 md:right-2 bg-black/70 hover:bg-black/90 text-white/80 hover:text-white p-1 rounded-full text-xs z-40 backdrop-blur-sm border border-white/10"
+                title={showYtVideo ? "Hide Media Player" : "Show Media Player"}
+              >
+                {showYtVideo ? <EyeOff size={13} /> : <Eye size={13} />}
+              </button>
+            </div>
+          )}
 
           {/* Global Synchronized Music Pill & Interactive Shared Seek Bar (when song is selected) */}
           {musicState.currentTrack && (

@@ -5,7 +5,7 @@ import { useSocket } from '../context/SocketContext';
 import { useAudioMixer } from '../context/AudioMixerContext';
 import { Play, Pause, Music, Upload, Loader2, Plus, Volume2, Link as LinkIcon, Radio, Share2 } from 'lucide-react';
 
-import { extractYouTubeId, isYouTubeUrl } from '../utils/youtube';
+import { parseMediaUrl, extractYouTubeId, isYouTubeUrl } from '../utils/mediaPlatform';
 
 interface MusicTrack {
   id: string;
@@ -268,30 +268,51 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
     }
   };
 
-  // Quick Play handler: immediately starts playing any YouTube link or audio URL for everyone
+  // Quick Play handler: immediately starts playing any YouTube, Spotify, SoundCloud, or Monochrome / Lossless audio link
   const handleQuickPlay = (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickUrl.trim()) return;
 
     const trimmed = quickUrl.trim();
-    const ytId = extractYouTubeId(trimmed);
+    const media = parseMediaUrl(trimmed);
     
     let newTrack: MusicTrack;
-    if (ytId) {
+    if (media.platform === 'youtube' && media.id) {
       newTrack = {
-        id: `yt-${ytId}-${Date.now()}`,
+        id: `yt-${media.id}-${Date.now()}`,
         title: 'YouTube Track',
         artist: 'YouTube Music',
         url: trimmed,
         duration: 300,
         isRoyaltyFree: false,
-        thumbnail: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`
+        thumbnail: `https://img.youtube.com/vi/${media.id}/hqdefault.jpg`
+      };
+    } else if (media.platform === 'spotify') {
+      newTrack = {
+        id: `spotify-${media.id}-${Date.now()}`,
+        title: 'Spotify Track',
+        artist: 'Spotify',
+        url: trimmed,
+        duration: 240,
+        isRoyaltyFree: false,
+        thumbnail: 'https://open.spotifycdn.com/cdn/images/favicon32.8e66b099.png'
+      };
+    } else if (media.platform === 'soundcloud') {
+      newTrack = {
+        id: `sc-${Date.now()}`,
+        title: 'SoundCloud Track',
+        artist: 'SoundCloud',
+        url: trimmed,
+        duration: 240,
+        isRoyaltyFree: false,
+        thumbnail: 'https://a-v2.sndcdn.com/assets/images/sc-icons/favicon-2cadd14bdb.ico'
       };
     } else {
+      // Monochrome / Direct Lossless / Web Audio Stream
       newTrack = {
-        id: `custom-${Date.now()}`,
-        title: 'Custom Audio Stream',
-        artist: 'Web Audio',
+        id: `stream-${Date.now()}`,
+        title: trimmed.includes('monochrome') ? 'Monochrome Stream' : 'Lossless Audio Stream',
+        artist: 'High-Fidelity Audio',
         url: trimmed,
         duration: 300,
         isRoyaltyFree: true
@@ -309,7 +330,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
       <div className="p-4 border-b border-white/10 flex justify-between items-center">
         <div className="flex items-center gap-2">
           <Music size={20} className="text-fuchsia-400" />
-          <h2 className="text-lg font-semibold tracking-wide">Shared Music</h2>
+          <h2 className="text-lg font-semibold tracking-wide">Shared Music Hub</h2>
         </div>
         <button
           onClick={() => setShowAddModal(true)}
@@ -320,18 +341,18 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
         </button>
       </div>
 
-      {/* Instant YouTube & Song Link Bar */}
+      {/* Instant Multi-Platform Song Link Bar */}
       <div className="p-3 bg-gradient-to-b from-fuchsia-950/40 to-black/20 border-b border-white/10">
         <form onSubmit={handleQuickPlay} className="space-y-2">
           <div className="flex items-center justify-between text-[11px] text-fuchsia-300 font-semibold px-0.5">
-            <span>⚡ Play Any YouTube / Song Link</span>
+            <span>⚡ YouTube, Spotify, SoundCloud, Monochrome</span>
           </div>
           <div className="flex gap-1.5">
             <input
               type="text"
               value={quickUrl}
               onChange={(e) => setQuickUrl(e.target.value)}
-              placeholder="Paste YouTube link here..."
+              placeholder="Paste Spotify, YouTube, or Stream link..."
               className="flex-1 bg-white/10 border border-white/15 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder-white/40 focus:outline-none focus:border-fuchsia-500 transition-all"
             />
             <button
