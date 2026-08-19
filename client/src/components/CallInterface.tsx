@@ -1125,37 +1125,77 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   }, [localStream]);
 
   const startLocalMedia = async () => {
-    let stream: MediaStream | null = null;
+    let audioTrack: MediaStreamTrack | null = null;
+    let videoTrack: MediaStreamTrack | null = null;
+
+    // 1. Try to acquire audio track (Microphone) with fallbacks
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        let audioStream;
         try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              facingMode: 'user',
-              width: { ideal: 1280 },
-              height: { ideal: 720 }
-            },
+          audioStream = await navigator.mediaDevices.getUserMedia({
             audio: {
               echoCancellation: true,
               noiseSuppression: true,
               autoGainControl: false
             }
           });
-        } catch (e1) {
-          console.warn('[Media] Ideal constraints failed, trying basic video/audio:', e1);
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: true,
+        } catch (firstErr) {
+          console.warn('[Media] Ideal audio constraints failed, trying basic audio:true...', firstErr);
+          audioStream = await navigator.mediaDevices.getUserMedia({
             audio: true
           });
         }
+        audioTrack = audioStream.getAudioTracks()[0] || null;
       }
-      console.log('[Media] Real camera/mic acquired');
     } catch (err) {
-      console.warn('[Media] Camera/mic blocked or unavailable, using canvas fallback:', err);
+      console.warn('[Media] Failed to acquire microphone track on startup:', err);
     }
 
-    if (!stream) {
+    // 2. Try to acquire video track (Camera) with fallbacks
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        let videoStream;
+        try {
+          videoStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: 'user',
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            }
+          });
+        } catch (firstErr) {
+          console.warn('[Media] Ideal video constraints failed, trying basic video:true...', firstErr);
+          videoStream = await navigator.mediaDevices.getUserMedia({
+            video: true
+          });
+        }
+        videoTrack = videoStream.getVideoTracks()[0] || null;
+      }
+    } catch (err) {
+      console.warn('[Media] Failed to acquire camera track on startup:', err);
+    }
+
+    // 3. Assemble local stream
+    let stream = new MediaStream();
+    if (audioTrack) stream.addTrack(audioTrack);
+    if (videoTrack) stream.addTrack(videoTrack);
+
+    // If both failed or are empty, create fallback virtual tracks
+    if (stream.getTracks().length === 0) {
       stream = createFallbackStream();
+    } else {
+      // If we got one but not both, fill in the missing track with fallback
+      if (!audioTrack) {
+        const fallbackStream = createFallbackStream();
+        const fallbackAudio = fallbackStream.getAudioTracks()[0];
+        if (fallbackAudio) stream.addTrack(fallbackAudio);
+      }
+      if (!videoTrack) {
+        const fallbackStream = createFallbackStream();
+        const fallbackVideo = fallbackStream.getVideoTracks()[0];
+        if (fallbackVideo) stream.addTrack(fallbackVideo);
+      }
     }
 
     // Camera and Microphone must be OFF by default
@@ -1451,9 +1491,17 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       const audioTracks = localStreamRef.current.getAudioTracks();
       if (audioTracks.length === 0 || audioTracks[0].label.includes('Virtual') || audioTracks[0].label.includes('Silent')) {
         try {
-          const realStream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false }
-          });
+          let realStream;
+          try {
+            realStream = await navigator.mediaDevices.getUserMedia({
+              audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false }
+            });
+          } catch (firstErr) {
+            console.warn('[Media] Ideal audio constraints failed, trying basic audio:true...', firstErr);
+            realStream = await navigator.mediaDevices.getUserMedia({
+              audio: true
+            });
+          }
           const realTrack = realStream.getAudioTracks()[0];
           if (realTrack) {
             localStreamRef.current.removeTrack(audioTracks[0]);
@@ -1518,9 +1566,17 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       const videoTracks = localStreamRef.current.getVideoTracks();
       if (videoTracks.length === 0 || videoTracks[0].label.includes('Virtual') || videoTracks[0].label.includes('canvas')) {
         try {
-          const realStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
-          });
+          let realStream;
+          try {
+            realStream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+            });
+          } catch (firstErr) {
+            console.warn('[Media] Ideal camera constraints failed, trying basic video:true...', firstErr);
+            realStream = await navigator.mediaDevices.getUserMedia({
+              video: true
+            });
+          }
           const realTrack = realStream.getVideoTracks()[0];
           if (realTrack) {
             localStreamRef.current.removeTrack(videoTracks[0]);
