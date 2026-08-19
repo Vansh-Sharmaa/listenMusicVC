@@ -288,10 +288,10 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const sendMusicAction = useCallback((
-    action: 'play' | 'pause' | 'seek' | 'change',
+    action: 'play' | 'pause' | 'seek' | 'change' | 'queue-add' | 'queue-remove' | 'queue-pop',
     trackId?: string | null,
     position?: number,
-    trackData?: { id: string; title: string; artist: string; url: string; duration: number; isRoyaltyFree?: boolean } | null
+    trackData?: { id: string; title: string; artist: string; url: string; duration: number; isRoyaltyFree?: boolean; thumbnail?: string } | null
   ) => {
     const sock = socketRef.current;
     if (!sock || !roomIdRef.current) return;

@@ -261,8 +261,8 @@ apiRouter.get('/music/search', async (req: Request, res: Response) => {
       try {
         const itunesRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=10`);
         if (itunesRes.ok) {
-          const itunesData = await itunesRes.json();
-          if (itunesData.results && Array.isArray(itunesData.results)) {
+          const itunesData = (await itunesRes.json()) as any;
+          if (itunesData && Array.isArray(itunesData.results)) {
             for (const item of itunesData.results) {
               results.push({
                 id: `itunes-${item.trackId}`,
@@ -320,7 +320,7 @@ apiRouter.get('/lyrics', async (req: Request, res: Response) => {
     });
 
     if (lrcRes.ok) {
-      const data = await lrcRes.json();
+      const data = (await lrcRes.json()) as any;
       return res.json({
         id: data.id,
         trackName: data.trackName,
@@ -337,7 +337,7 @@ apiRouter.get('/lyrics', async (req: Request, res: Response) => {
     });
 
     if (searchRes.ok) {
-      const results = await searchRes.json();
+      const results = (await searchRes.json()) as any;
       if (Array.isArray(results) && results.length > 0) {
         // Find best match with synced lyrics
         const best = results.find((r: any) => r.syncedLyrics) || results[0];
