@@ -418,6 +418,11 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
   // Permanent music player ref
   const musicAudioRef = useRef<HTMLAudioElement | null>(null);
+  if (typeof window !== 'undefined' && !musicAudioRef.current) {
+    const audio = new Audio();
+    audio.crossOrigin = 'anonymous';
+    musicAudioRef.current = audio;
+  }
   const isSyncingMusicRef = useRef(false);
 
   // Mapping socketId -> { userId, username } so remote peer cards have the actual userId
