@@ -625,6 +625,8 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                 rel: 0,
                 playsinline: 1,
                 enablejsapi: 1,
+                origin: typeof window !== 'undefined' ? window.location.origin : undefined,
+                widget_referrer: typeof window !== 'undefined' ? window.location.href : undefined,
                 start: Math.floor(targetPos)
               },
               events: {
@@ -664,10 +666,26 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                     setTimeout(() => { isLocalTriggeredRef.current = false; }, 600);
                   }
                 },
-                onError: (err: any) => {
+                onError: async (err: any) => {
                   console.warn('[YouTube Player] Error code:', err?.data);
-                  if (err?.data === 101 || err?.data === 150) {
-                    alert('Notice: The owner of this video has disabled external embedding.\n\nTip: Please paste another YouTube song link or choose one of the featured tracks!');
+                  if (err?.data === 101 || err?.data === 150 || err?.data === 2) {
+                    // Try auto-fallback to alternative audio version of this song
+                    if (musicState.currentTrack?.title) {
+                      try {
+                        const serverUrl = (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '');
+                        const res = await fetch(`${serverUrl}/api/music/search?q=${encodeURIComponent(musicState.currentTrack.title + ' audio')}`);
+                        if (res.ok) {
+                          const results = await res.json();
+                          const fallback = results.find((r: any) => r.id !== `yt-${ytId}`);
+                          if (fallback) {
+                            console.log('[YouTube] Auto-switching to embeddable version:', fallback.title);
+                            sendMusicAction('change', fallback.id, 0, fallback);
+                            sendMusicAction('play', fallback.id, 0, fallback);
+                            return;
+                          }
+                        }
+                      } catch (_) {}
+                    }
                   }
                 }
               }
