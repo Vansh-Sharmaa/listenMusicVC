@@ -14,6 +14,7 @@ interface LyricsViewProps {
     thumbnail?: string;
   } | null;
   currentTime: number;
+  getTime?: () => number;
   isPlaying: boolean;
   theme?: 'light' | 'dark';
   onSeek: (seconds: number) => void;
@@ -23,93 +24,10 @@ interface LyricsViewProps {
 
 const SPRING_CFG = { type: 'spring', stiffness: 280, damping: 32, mass: 0.9 } as const;
 
-// Active line with real word-by-word progressive glow
-const ActiveLyricLine = React.memo(function ActiveLyricLine({
-  line,
-  nextLineTime,
-  currentTime,
-  isLight,
-  onSeek,
-}: {
-  line: LyricLine;
-  nextLineTime: number | undefined;
-  currentTime: number;
-  isLight: boolean;
-  onSeek: (t: number) => void;
-}) {
-  const words = useMemo(() => line.text.split(/(\s+)/), [line.text]);
-  const nonSpaceWords = useMemo(() => words.filter(w => w.trim().length > 0), [words]);
-  const totalWords = nonSpaceWords.length || 1;
-
-  const lineDuration = nextLineTime ? Math.max(1.2, nextLineTime - line.time) : 4.0;
-  const elapsed = Math.max(0, currentTime - line.time);
-  const rawProgress = Math.min(totalWords, (elapsed / lineDuration) * (totalWords + 0.5));
-
-  let wordIdx = 0;
-
-  return (
-    <motion.button
-      onClick={() => onSeek(line.time)}
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0, scale: 1.025 }}
-      transition={SPRING_CFG}
-      className="w-full text-left relative py-2 px-3 rounded-2xl focus:outline-none select-none z-10"
-      style={{ transformOrigin: 'left center', filter: 'blur(0px)' }}
-    >
-      <p className="text-xl md:text-3xl leading-relaxed tracking-tight font-black m-0">
-        {words.map((word, wIdx) => {
-          if (word.trim().length === 0) {
-            return <span key={wIdx}>{word}</span>;
-          }
-
-          const myWordIdx = wordIdx++;
-          const progress = rawProgress - myWordIdx;
-          const isFullyLit = progress >= 1;
-          const isCurrentWord = progress > 0 && progress < 1;
-          const clampedPct = Math.max(0, Math.min(1, progress));
-
-          return (
-            <span
-              key={wIdx}
-              className="inline-block"
-              style={{
-                color: isLight
-                  ? isFullyLit
-                    ? 'rgba(0,0,0,0.96)'
-                    : isCurrentWord
-                    ? `rgba(0,0,0,${0.3 + clampedPct * 0.66})`
-                    : 'rgba(0,0,0,0.28)'
-                  : isFullyLit
-                  ? 'rgba(255,255,255,0.98)'
-                  : isCurrentWord
-                  ? `rgba(255,255,255,${0.28 + clampedPct * 0.70})`
-                  : 'rgba(255,255,255,0.28)',
-                textShadow: isLight
-                  ? isFullyLit
-                    ? '0 0 14px rgba(0,0,0,0.5)'
-                    : isCurrentWord
-                    ? `0 0 ${4 + clampedPct * 12}px rgba(0,0,0,${0.1 + clampedPct * 0.4})`
-                    : 'none'
-                  : isFullyLit
-                  ? '0 0 22px rgba(255,255,255,0.85), 0 0 40px rgba(255,255,255,0.3)'
-                  : isCurrentWord
-                  ? `0 0 ${6 + clampedPct * 20}px rgba(255,255,255,${0.1 + clampedPct * 0.8})`
-                  : 'none',
-                transition: 'color 0.2s linear, text-shadow 0.2s linear',
-              }}
-            >
-              {word}
-            </span>
-          );
-        })}
-      </p>
-    </motion.button>
-  );
-});
-
 export const LyricsView: React.FC<LyricsViewProps> = ({
   currentTrack,
   currentTime,
+  getTime,
   isPlaying,
   theme = 'dark',
   onSeek,
@@ -124,32 +42,49 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const lyricsRef = useRef<LyricsData | null>(null);
+  const activeLineIndexRef = useRef<number>(-1);
 
+  // Word span refs: wordSpanRefs[lineIndex][wordIndex] -> HTMLSpanElement
+  const wordSpanRefs = useRef<HTMLSpanElement[][]>([]);
+  const rafRef = useRef<number | null>(null);
+  const isLightRef = useRef(isLight);
+  useEffect(() => { isLightRef.current = isLight; }, [isLight]);
+
+  // 1. Fetch lyrics
   useEffect(() => {
-    if (!currentTrack?.title) {
-      setLyrics(null);
-      return;
-    }
+    if (!currentTrack?.title) { setLyrics(null); lyricsRef.current = null; return; }
     let isMounted = true;
     setLoading(true);
     setActiveLineIndex(-1);
+    activeLineIndexRef.current = -1;
     fetchLyrics(currentTrack.title, currentTrack.artist, currentTrack.duration)
       .then((data) => {
-        if (isMounted) { setLyrics(data); setLoading(false); }
+        if (isMounted) {
+          setLyrics(data);
+          lyricsRef.current = data;
+          setLoading(false);
+          wordSpanRefs.current = [];
+        }
       })
       .catch(() => { if (isMounted) setLoading(false); });
     return () => { isMounted = false; };
   }, [currentTrack?.title, currentTrack?.artist]);
 
+  // 2. Active line tracking via React state (for scroll & structure re-render only)
   useEffect(() => {
     if (!lyrics || !lyrics.lines.length) return;
     let currentIndex = -1;
     for (let i = 0; i < lyrics.lines.length; i++) {
       if (currentTime >= lyrics.lines[i].time) { currentIndex = i; } else { break; }
     }
-    setActiveLineIndex(currentIndex);
+    if (currentIndex !== activeLineIndex) {
+      setActiveLineIndex(currentIndex);
+      activeLineIndexRef.current = currentIndex;
+    }
   }, [currentTime, lyrics]);
 
+  // 3. Smooth auto-scroll
   useEffect(() => {
     if (userIsScrolling || activeLineIndex < 0) return;
     const el = lineRefs.current[activeLineIndex];
@@ -164,6 +99,70 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
     scrollTimeoutRef.current = setTimeout(() => setUserIsScrolling(false), 2800);
   }, []);
 
+  // 4. THE CORE: 60fps RAF loop that directly paints word glow via DOM style
+  //    Zero React re-renders. Pure DOM mutation for buttery smoothness.
+  useEffect(() => {
+    const paint = () => {
+      const lyricData = lyricsRef.current;
+      const activeIdx = activeLineIndexRef.current;
+      const light = isLightRef.current;
+
+      if (lyricData && activeIdx >= 0) {
+        const line = lyricData.lines[activeIdx];
+        const nextLine = lyricData.lines[activeIdx + 1];
+        const nowSecs = getTime ? getTime() : currentTime;
+
+        const lineDuration = nextLine ? Math.max(1.2, nextLine.time - line.time) : 4.0;
+        const elapsed = Math.max(0, nowSecs - line.time);
+        const wordSpans = wordSpanRefs.current[activeIdx];
+
+        if (wordSpans && wordSpans.length > 0) {
+          const totalWords = wordSpans.length;
+          // rawProgress goes from 0 → totalWords over the line duration
+          const rawProgress = Math.min(totalWords, (elapsed / lineDuration) * (totalWords + 0.5));
+
+          for (let i = 0; i < totalWords; i++) {
+            const span = wordSpans[i];
+            if (!span) continue;
+            const progress = rawProgress - i; // 0=future, 0-1=current, >1=past
+            const isFullyLit = progress >= 1;
+            const isCurrentWord = progress > 0 && progress < 1;
+            const p = Math.max(0, Math.min(1, progress));
+
+            if (light) {
+              if (isFullyLit) {
+                span.style.color = 'rgba(0,0,0,0.96)';
+                span.style.textShadow = '0 0 12px rgba(0,0,0,0.45)';
+              } else if (isCurrentWord) {
+                span.style.color = `rgba(0,0,0,${0.28 + p * 0.68})`;
+                span.style.textShadow = `0 0 ${4 + p * 10}px rgba(0,0,0,${0.08 + p * 0.37})`;
+              } else {
+                span.style.color = 'rgba(0,0,0,0.28)';
+                span.style.textShadow = 'none';
+              }
+            } else {
+              if (isFullyLit) {
+                span.style.color = 'rgba(255,255,255,0.98)';
+                span.style.textShadow = '0 0 20px rgba(255,255,255,0.9), 0 0 38px rgba(255,255,255,0.4)';
+              } else if (isCurrentWord) {
+                span.style.color = `rgba(255,255,255,${0.26 + p * 0.72})`;
+                span.style.textShadow = `0 0 ${5 + p * 22}px rgba(255,255,255,${0.08 + p * 0.82})`;
+              } else {
+                span.style.color = 'rgba(255,255,255,0.26)';
+                span.style.textShadow = 'none';
+              }
+            }
+          }
+        }
+      }
+
+      rafRef.current = requestAnimationFrame(paint);
+    };
+
+    rafRef.current = requestAnimationFrame(paint);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [getTime]); // only re-subscribe if getTime changes
+
   if (!currentTrack) {
     return (
       <div className={`h-full flex flex-col items-center justify-center p-6 text-center select-none ${isLight ? 'text-black/40' : 'text-white/40'}`}>
@@ -176,6 +175,8 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
 
   return (
     <div className={`flex flex-col h-full w-full relative overflow-hidden select-none transition-colors duration-500 ${isLight ? 'text-black' : 'text-white'}`}>
+
+      {/* Header */}
       <div className={`p-4 border-b flex items-center justify-between z-10 backdrop-blur-2xl ${isLight ? 'bg-white/40 border-black/5' : 'bg-black/30 border-white/5'}`}>
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="p-1.5 rounded-lg bg-fuchsia-500/20 text-fuchsia-400 shadow-inner">
@@ -199,6 +200,7 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
         )}
       </div>
 
+      {/* Lyrics body */}
       <div
         ref={containerRef}
         onScroll={handleScroll}
@@ -222,43 +224,59 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
             {lyrics.lines.map((line: LyricLine, index: number) => {
               const isActive = index === activeLineIndex;
               const isPast = index < activeLineIndex;
-              const nextLineTime = lyrics.lines[index + 1]?.time;
+              // Split words for rendering - preserve spaces
+              const tokens = line.text.split(/(\s+)/);
+              const nonSpaceTokenIndices: number[] = [];
+              tokens.forEach((t, i) => { if (t.trim().length > 0) nonSpaceTokenIndices.push(i); });
 
               return (
-                <div key={`${line.time}-${index}`} ref={(el) => { lineRefs.current[index] = el; }}>
-                  {isActive ? (
-                    <ActiveLyricLine
-                      line={line}
-                      nextLineTime={nextLineTime}
-                      currentTime={currentTime}
-                      isLight={isLight}
-                      onSeek={onSeek}
-                    />
-                  ) : (
-                    <motion.button
-                      onClick={() => onSeek(line.time)}
-                      animate={{
-                        opacity: isPast ? 0.38 : 0.24,
-                        filter: isPast ? 'blur(0.5px)' : 'blur(1.5px)',
-                        scale: 1,
-                      }}
-                      transition={SPRING_CFG}
-                      className="w-full text-left relative py-2 px-3 rounded-2xl focus:outline-none select-none group"
-                      style={{ transformOrigin: 'left center' }}
-                      whileHover={{ opacity: 0.72, filter: 'blur(0px)', transition: { duration: 0.15 } }}
-                    >
-                      <p
-                        className="text-xl md:text-3xl leading-relaxed tracking-tight font-black m-0"
-                        style={{
-                          color: isLight
-                            ? isPast ? 'rgba(0,0,0,0.85)' : 'rgba(0,0,0,0.5)'
-                            : isPast ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)',
-                        }}
-                      >
-                        {line.text}
-                      </p>
-                    </motion.button>
-                  )}
+                <div
+                  key={`${line.time}-${index}`}
+                  ref={(el) => { lineRefs.current[index] = el; }}
+                >
+                  <motion.button
+                    onClick={() => onSeek(line.time)}
+                    animate={{
+                      opacity: isActive ? 1 : isPast ? 0.38 : 0.24,
+                      filter: isActive ? 'blur(0px)' : isPast ? 'blur(0.4px)' : 'blur(1.4px)',
+                      scale: isActive ? 1.025 : 1,
+                    }}
+                    transition={SPRING_CFG}
+                    className="w-full text-left relative py-2 px-3 rounded-2xl focus:outline-none select-none group"
+                    style={{ transformOrigin: 'left center' }}
+                    whileHover={!isActive ? { opacity: 0.72, filter: 'blur(0px)', transition: { duration: 0.14 } } : undefined}
+                  >
+                    <p className="text-xl md:text-3xl leading-relaxed tracking-tight font-black m-0">
+                      {tokens.map((token, tIdx) => {
+                        if (token.trim().length === 0) {
+                          return <span key={tIdx}>{token}</span>;
+                        }
+                        const wordIdx = nonSpaceTokenIndices.indexOf(tIdx);
+                        return (
+                          <span
+                            key={tIdx}
+                            ref={(el) => {
+                              if (isActive && el) {
+                                if (!wordSpanRefs.current[index]) wordSpanRefs.current[index] = [];
+                                wordSpanRefs.current[index][wordIdx] = el;
+                              }
+                            }}
+                            className="inline-block"
+                            style={{
+                              // Initial color based on line state; RAF will override for active line
+                              color: isActive
+                                ? (isLight ? 'rgba(0,0,0,0.28)' : 'rgba(255,255,255,0.26)')
+                                : isPast
+                                ? (isLight ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)')
+                                : (isLight ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.5)'),
+                            }}
+                          >
+                            {token}
+                          </span>
+                        );
+                      })}
+                    </p>
+                  </motion.button>
                 </div>
               );
             })}
@@ -267,6 +285,7 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
         )}
       </div>
 
+      {/* Footer */}
       {lyrics && lyrics.synced && (
         <div className={`p-3 px-4 text-center border-t text-[10px] tracking-widest font-bold uppercase flex items-center justify-center gap-2 backdrop-blur-2xl ${isLight ? 'bg-white/30 border-black/5 text-black/30' : 'bg-black/30 border-white/5 text-white/25'}`}>
           <span className={`h-1 w-1 rounded-full ${isPlaying ? 'bg-fuchsia-400 animate-pulse' : 'bg-white/30'}`} />

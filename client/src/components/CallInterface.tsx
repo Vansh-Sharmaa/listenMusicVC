@@ -2167,6 +2167,12 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                 <LyricsView
                   currentTrack={musicState.currentTrack as any}
                   currentTime={songProgress.current}
+                  getTime={() => {
+                    if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
+                      try { return ytPlayerRef.current.getCurrentTime() || 0; } catch (_) { return songProgress.current; }
+                    }
+                    return musicAudioRef.current?.currentTime || songProgress.current;
+                  }}
                   isPlaying={musicState.isPlaying}
                   theme={theme}
                   onSeek={handleSeek}
