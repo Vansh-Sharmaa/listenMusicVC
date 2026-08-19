@@ -444,7 +444,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     }
   }, [musicVolume]);
 
-  // Permanent Shared Music Playback Synchronization (YouTube + HTML5 Audio)
+  // Permanent Shared Music Playback Synchronization (Ultra-Smooth YouTube + Direct Audio Engine)
   useEffect(() => {
     const audio = musicAudioRef.current;
 
@@ -491,7 +491,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     const ytId = extractYouTubeId(trackUrl);
 
     // ───────────────────────────────────────────
-    // Path A: Synchronized YouTube Video & Audio
+    // Path A: Synchronized Smooth YouTube Video & Audio
     // ───────────────────────────────────────────
     if (ytId) {
       if (audio && !audio.paused) audio.pause();
@@ -499,76 +499,75 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       const elapsed = (getServerTime() - Number(musicState.lastPositionUpdatedAt || Date.now())) / 1000;
       const targetPos = Math.max(0, (musicState.lastPosition || 0) + (musicState.isPlaying ? elapsed : 0));
 
-      const initOrSyncYT = () => {
-        if (!ytPlayerRef.current) {
-          if ((window as any).YT && (window as any).YT.Player) {
-            try {
-              ytPlayerRef.current = new (window as any).YT.Player('youtube-sync-player', {
-                height: '100%',
-                width: '100%',
-                videoId: ytId,
-                playerVars: {
-                  autoplay: musicState.isPlaying ? 1 : 0,
-                  controls: 1,
-                  disablekb: 0,
-                  modestbranding: 1,
-                  rel: 0,
-                  playsinline: 1,
-                  start: Math.floor(targetPos)
-                },
-                events: {
-                  onReady: (event: any) => {
-                    ytPlayerReadyRef.current = true;
-                    currentYtVideoIdRef.current = ytId;
-                    event.target.setVolume(Math.max(0, Math.min(100, Math.round(musicVolume * 100))));
-                    if (musicState.isPlaying) {
-                      event.target.playVideo();
-                    } else {
-                      event.target.pauseVideo();
-                    }
-                  },
-                  onError: (err: any) => {
-                    console.warn('[YouTube Player] Error:', err);
-                  }
-                }
-              });
-            } catch (e) {
-              console.warn('[YouTube] Player initialization error:', e);
-            }
-          }
-        } else if (ytPlayerReadyRef.current) {
+      if (!ytPlayerRef.current) {
+        if ((window as any).YT && (window as any).YT.Player) {
           try {
-            if (currentYtVideoIdRef.current !== ytId) {
-              currentYtVideoIdRef.current = ytId;
-              ytPlayerRef.current.loadVideoById({
-                videoId: ytId,
-                startSeconds: Math.floor(targetPos)
-              });
-            }
-
-            ytPlayerRef.current.setVolume(Math.max(0, Math.min(100, Math.round(musicVolume * 100))));
-
-            if (musicState.isPlaying) {
-              ytPlayerRef.current.playVideo();
-              const currentPos = ytPlayerRef.current.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : 0;
-              if (Math.abs(currentPos - targetPos) > 2.0) {
-                ytPlayerRef.current.seekTo(targetPos, true);
+            ytPlayerRef.current = new (window as any).YT.Player('youtube-sync-player', {
+              height: '100%',
+              width: '100%',
+              videoId: ytId,
+              playerVars: {
+                autoplay: 1,
+                controls: 1,
+                disablekb: 0,
+                modestbranding: 1,
+                rel: 0,
+                playsinline: 1,
+                enablejsapi: 1,
+                start: Math.floor(targetPos)
+              },
+              events: {
+                onReady: (event: any) => {
+                  ytPlayerReadyRef.current = true;
+                  currentYtVideoIdRef.current = ytId;
+                  event.target.setVolume(Math.max(0, Math.min(100, Math.round(musicVolume * 100))));
+                  if (musicState.isPlaying) {
+                    event.target.playVideo();
+                  } else {
+                    event.target.pauseVideo();
+                  }
+                },
+                onError: (err: any) => {
+                  console.warn('[YouTube Player] Error:', err);
+                }
               }
-            } else {
-              ytPlayerRef.current.pauseVideo();
-              if (Math.abs((ytPlayerRef.current.getCurrentTime?.() || 0) - (musicState.lastPosition || 0)) > 2.0) {
-                ytPlayerRef.current.seekTo(musicState.lastPosition || 0, true);
-              }
-            }
-          } catch (err) {
-            console.warn('[YouTube] Sync loop exception:', err);
+            });
+          } catch (e) {
+            console.warn('[YouTube] Player initialization error:', e);
           }
         }
-      };
+      } else if (ytPlayerReadyRef.current) {
+        try {
+          // If track changed: load the new video once at the synced position
+          if (currentYtVideoIdRef.current !== ytId) {
+            currentYtVideoIdRef.current = ytId;
+            ytPlayerRef.current.loadVideoById({
+              videoId: ytId,
+              startSeconds: Math.floor(targetPos)
+            });
+          }
 
-      initOrSyncYT();
-      const ytInterval = setInterval(initOrSyncYT, 2000);
-      return () => clearInterval(ytInterval);
+          ytPlayerRef.current.setVolume(Math.max(0, Math.min(100, Math.round(musicVolume * 100))));
+
+          if (musicState.isPlaying) {
+            ytPlayerRef.current.playVideo();
+            // Smooth drift correction only if out of sync by > 4.0 seconds (prevents stuttering)
+            const currentPos = ytPlayerRef.current.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : 0;
+            if (Math.abs(currentPos - targetPos) > 4.0) {
+              ytPlayerRef.current.seekTo(targetPos, true);
+            }
+          } else {
+            ytPlayerRef.current.pauseVideo();
+            const currentPos = ytPlayerRef.current.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : 0;
+            if (Math.abs(currentPos - (musicState.lastPosition || 0)) > 2.0) {
+              ytPlayerRef.current.seekTo(musicState.lastPosition || 0, true);
+            }
+          }
+        } catch (err) {
+          console.warn('[YouTube] Sync loop exception:', err);
+        }
+      }
+      return;
     }
 
     // ───────────────────────────────────────────
@@ -594,7 +593,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
           const elapsed = (getServerTime() - Number(musicState.lastPositionUpdatedAt)) / 1000;
           const targetPos = Math.max(0, musicState.lastPosition + elapsed);
 
-          if (Math.abs(audio.currentTime - targetPos) > 0.6) {
+          if (Math.abs(audio.currentTime - targetPos) > 2.0) {
             audio.currentTime = targetPos;
           }
 
@@ -609,7 +608,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
           if (!audio.paused) {
             audio.pause();
           }
-          if (Math.abs(audio.currentTime - musicState.lastPosition) > 0.6) {
+          if (Math.abs(audio.currentTime - musicState.lastPosition) > 1.0) {
             audio.currentTime = musicState.lastPosition;
           }
         }
@@ -621,8 +620,6 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     };
 
     syncAudio();
-    const interval = setInterval(syncAudio, 2000);
-    return () => clearInterval(interval);
   }, [musicState, getServerTime, musicVolume]);
 
   // Sync local video element
