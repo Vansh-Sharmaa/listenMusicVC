@@ -37,7 +37,11 @@ import {
   SkipBack,
   Sun,
   Moon,
-  Mic2
+  Mic2,
+  Search,
+  X,
+  Plus,
+  ListPlus
 } from 'lucide-react';
 import { LyricsView } from './LyricsView';
 import { extractPaletteFromImage, SongColorPalette } from '../utils/colorExtractor';
@@ -246,6 +250,88 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       setSongPalette(null);
     }
   }, [musicState.currentTrack?.thumbnail]);
+
+  // Expanded Apple-style Theater View states
+  const [expandedSearchQuery, setExpandedSearchQuery] = useState('');
+  const [expandedSearchResults, setExpandedSearchResults] = useState<any[]>([]);
+  const [isExpandedSearching, setIsExpandedSearching] = useState(false);
+  const [showExpandedSearchPopup, setShowExpandedSearchPopup] = useState(false);
+  const [expandedViewMode, setExpandedViewMode] = useState<'visualizer' | 'video'>('visualizer');
+
+  // Debounced search for expanded Apple-style player
+  useEffect(() => {
+    if (!expandedSearchQuery.trim() || expandedSearchQuery.trim().startsWith('http')) {
+      setExpandedSearchResults([]);
+      setIsExpandedSearching(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsExpandedSearching(true);
+      try {
+        const serverUrl = (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '');
+        const res = await fetch(`${serverUrl}/api/music/search?q=${encodeURIComponent(expandedSearchQuery.trim())}`);
+        if (res.ok) {
+          const data = await res.json();
+          setExpandedSearchResults(data);
+          setShowExpandedSearchPopup(true);
+        }
+      } catch (e) {
+        console.warn('[Expanded Search] Error:', e);
+      } finally {
+        setIsExpandedSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [expandedSearchQuery]);
+
+  const handleExpandedSearchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isDjAuthorized) {
+      alert('👑 Enter the 4-digit DJ PIN in the Music Hub to control tracks for the room.');
+      return;
+    }
+    const q = expandedSearchQuery.trim();
+    if (!q) return;
+
+    if (q.startsWith('http://') || q.startsWith('https://')) {
+      const ytId = extractYouTubeId(q);
+      if (ytId) {
+        const newTrack = {
+          id: `yt-${ytId}`,
+          title: `YouTube Track (${ytId})`,
+          artist: 'YouTube',
+          url: `https://www.youtube.com/watch?v=${ytId}`,
+          duration: 240,
+          isRoyaltyFree: false,
+          thumbnail: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`
+        };
+        sendMusicAction('change', newTrack.id, 0, newTrack);
+        setExpandedSearchQuery('');
+        setShowExpandedSearchPopup(false);
+        return;
+      }
+    }
+
+    setIsExpandedSearching(true);
+    try {
+      const serverUrl = (process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001').replace(/\/+$/, '');
+      const res = await fetch(`${serverUrl}/api/music/search?q=${encodeURIComponent(q)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          sendMusicAction('change', data[0].id, 0, data[0]);
+          setExpandedSearchQuery('');
+          setShowExpandedSearchPopup(false);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsExpandedSearching(false);
+    }
+  };
 
   // Real-time Speech Detection Loop with Hysteresis Smoothing
   useEffect(() => {
@@ -2054,205 +2140,422 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             </div>
           )}
 
-          {/* Full Center-Stage Theater View for Monochrome, Spotify & YouTube */}
+          {/* Full Center-Stage Apple Music Blurred Theater View */}
           {isPlayerExpanded && musicState.currentTrack && (
-            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-3xl flex items-center justify-center p-3 sm:p-6 animate-fade-in">
-              <div className="bg-black/30 border border-white/10 rounded-[32px] w-full max-w-5xl h-[88vh] max-h-[800px] shadow-[0_8px_32px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden relative backdrop-blur-3xl">
-                {/* Center Stage Header */}
-                <div className="p-4 border-b border-white/10 bg-white/5 flex items-center justify-between">
-                  <div className="flex items-center gap-3 min-w-0">
+            <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-3xl flex items-center justify-center p-2 sm:p-6 animate-fade-in select-none">
+              {/* Dynamic Apple Music Fluid Ambient Mesh Background Layer */}
+              <div 
+                className="absolute inset-0 z-0 pointer-events-none opacity-60 transition-all duration-1000"
+                style={{
+                  background: songPalette
+                    ? `radial-gradient(circle at 20% 30%, ${songPalette.primary}, transparent 60%), radial-gradient(circle at 80% 70%, ${songPalette.secondary}, transparent 60%), radial-gradient(circle at 50% 50%, ${songPalette.darkMuted}, transparent 80%)`
+                    : undefined
+                }}
+              />
+              {musicState.currentTrack?.thumbnail && (
+                <div 
+                  className="absolute inset-0 z-0 bg-cover bg-center pointer-events-none opacity-40 mix-blend-screen transition-all duration-1000"
+                  style={{ 
+                    backgroundImage: `url(${musicState.currentTrack.thumbnail})`,
+                    filter: 'blur(100px) saturate(160%) brightness(0.8)',
+                    transform: 'scale(1.2)'
+                  }} 
+                />
+              )}
+
+              {/* Main Card Container */}
+              <div className="bg-black/40 border border-white/15 rounded-[36px] w-full max-w-5xl h-[90vh] max-h-[850px] shadow-[0_16px_48px_rgba(0,0,0,0.7)] flex flex-col overflow-hidden relative backdrop-blur-2xl z-10">
+                
+                {/* ── HEADER WITH INTEGRATED APPLE SEARCH BAR ── */}
+                <div className="p-3.5 sm:p-4 border-b border-white/10 bg-white/5 flex items-center justify-between gap-3 relative z-30">
+                  {/* Left: Track Status Pill */}
+                  <div className="flex items-center gap-2.5 min-w-0 max-w-[200px] sm:max-w-xs">
                     <span className="h-2.5 w-2.5 rounded-full bg-fuchsia-400 animate-pulse flex-shrink-0" />
                     <div className="flex flex-col min-w-0">
-                      <span className="text-base font-bold text-white truncate">
+                      <span className="text-xs sm:text-sm font-bold text-white truncate">
                         {musicState.currentTrack.title}
                       </span>
-                      <span className="text-xs text-fuchsia-300/80 truncate">
+                      <span className="text-[10px] sm:text-xs text-fuchsia-300/80 truncate">
                         {musicState.currentTrack.artist}
                       </span>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-emerald-400 font-semibold hidden sm:flex items-center gap-1.5 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
-                      <Radio size={12} className="animate-pulse" />
-                      Live Room Sync
-                    </span>
+                  {/* Center: Integrated Extended Search Bar */}
+                  <div className="flex-1 max-w-md relative">
+                    <form onSubmit={handleExpandedSearchSubmit} className="relative w-full">
+                      <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/50 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={expandedSearchQuery}
+                        onFocus={() => setShowExpandedSearchPopup(true)}
+                        onChange={(e) => {
+                          setExpandedSearchQuery(e.target.value);
+                          setShowExpandedSearchPopup(true);
+                        }}
+                        placeholder="Search YouTube or paste song link..."
+                        className="w-full bg-white/10 hover:bg-white/15 focus:bg-black/60 border border-white/15 focus:border-fuchsia-400/80 rounded-full pl-9 pr-8 py-1.5 text-xs text-white placeholder-white/40 focus:outline-none transition-all shadow-inner backdrop-blur-md"
+                      />
+                      {expandedSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedSearchQuery('');
+                            setExpandedSearchResults([]);
+                          }}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/40 hover:text-white p-0.5"
+                        >
+                          <X size={13} />
+                        </button>
+                      )}
+                    </form>
+
+                    {/* ── FROSTED GLASS SEARCH & SUGGESTIONS POPUP ── */}
+                    {showExpandedSearchPopup && (
+                      <div className="absolute top-full left-0 right-0 mt-2 z-50 bg-black/85 backdrop-blur-3xl border border-white/20 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] overflow-hidden max-h-80 flex flex-col animate-fade-in divide-y divide-white/10">
+                        {/* Quick Trending Suggestion Chips */}
+                        <div className="p-2.5 bg-white/5 space-y-1.5">
+                          <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-white/50 px-1">
+                            <span>🔥 Instant Mood / Trending</span>
+                            <button
+                              type="button"
+                              onClick={() => setShowExpandedSearchPopup(false)}
+                              className="text-white/40 hover:text-white text-xs font-bold"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-0.5">
+                            {[
+                              { label: '🔥 Trending', query: 'Top Global Hits 2024' },
+                              { label: '🌙 Lo-Fi', query: 'Lofi Hip Hop chill study' },
+                              { label: '✨ Pop Hits', query: 'Top Pop Music' },
+                              { label: '🎧 Hip-Hop', query: 'Hip Hop Rap Hits' },
+                              { label: '🕺 Bollywood', query: 'Bollywood Top Hits' },
+                              { label: '☕ Chill', query: 'Acoustic Chill Vibes' },
+                              { label: '⚡ EDM', query: 'EDM Party Festival' }
+                            ].map((chip) => (
+                              <button
+                                key={chip.label}
+                                type="button"
+                                onClick={() => setExpandedSearchQuery(chip.query)}
+                                className="text-[10px] whitespace-nowrap px-2.5 py-0.5 rounded-full bg-white/10 hover:bg-fuchsia-600 hover:text-white text-white/80 border border-white/10 transition-all active:scale-95 font-medium"
+                              >
+                                {chip.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Search Results List */}
+                        <div className="overflow-y-auto max-h-56 divide-y divide-white/5">
+                          {isExpandedSearching && (
+                            <div className="p-4 text-center text-xs text-white/50 flex items-center justify-center gap-2">
+                              <Disc size={14} className="animate-spin text-fuchsia-400" />
+                              <span>Searching YouTube live...</span>
+                            </div>
+                          )}
+
+                          {!isExpandedSearching && expandedSearchResults.length > 0 && (
+                            expandedSearchResults.map((result) => (
+                              <div
+                                key={result.id}
+                                className="p-2 hover:bg-fuchsia-600/20 transition-all flex items-center gap-2.5 group"
+                              >
+                                {result.thumbnail ? (
+                                  <img src={result.thumbnail} alt={result.title} className="w-10 h-10 rounded-lg object-cover border border-white/10 flex-shrink-0" />
+                                ) : (
+                                  <div className="w-10 h-10 rounded-lg bg-fuchsia-900/50 flex items-center justify-center flex-shrink-0">
+                                    <Music size={15} className="text-fuchsia-300" />
+                                  </div>
+                                )}
+                                <div
+                                  onClick={() => {
+                                    sendMusicAction('change', result.id, 0, result);
+                                    setShowExpandedSearchPopup(false);
+                                    setExpandedSearchQuery('');
+                                  }}
+                                  className="flex flex-col min-w-0 flex-1 cursor-pointer"
+                                >
+                                  <span className="text-xs font-semibold text-white group-hover:text-fuchsia-200 truncate">{result.title}</span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[10px] text-white/50 truncate max-w-[120px]">{result.artist}</span>
+                                    {result.duration > 0 && (
+                                      <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-white/10 text-white/40">
+                                        {Math.floor(result.duration / 60)}:{(result.duration % 60).toString().padStart(2, '0')}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => {
+                                      sendMusicAction('queue-add', result.id, 0, result);
+                                      alert(`Added "${result.title}" to Up Next! 🎶`);
+                                    }}
+                                    className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[10px] transition-all"
+                                    title="Add to Up Next Queue"
+                                  >
+                                    <Plus size={12} />
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      sendMusicAction('change', result.id, 0, result);
+                                      setShowExpandedSearchPopup(false);
+                                      setExpandedSearchQuery('');
+                                    }}
+                                    className="p-1.5 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-white shadow-md transition-all active:scale-95"
+                                    title="Play Now for Room"
+                                  >
+                                    <Play size={12} fill="white" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                          )}
+
+                          {!isExpandedSearching && expandedSearchResults.length === 0 && expandedSearchQuery && (
+                            <div className="p-4 text-center text-xs text-white/40">
+                              Press Enter or click Play to search "{expandedSearchQuery}"
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right Controls: Mode Switcher & Minimize */}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {/* Switch between Vinyl Visualizer and Live YouTube Video */}
+                    {isYouTubeUrl(musicState.currentTrack.url) && (
+                      <button
+                        onClick={() => setExpandedViewMode(expandedViewMode === 'visualizer' ? 'video' : 'visualizer')}
+                        className="bg-white/10 hover:bg-white/20 text-white px-2.5 py-1.5 rounded-xl text-xs transition-all active:scale-95 border border-white/15 flex items-center gap-1.5 font-semibold"
+                        title={expandedViewMode === 'visualizer' ? "Switch to Live Video" : "Switch to Visualizer Lounge"}
+                      >
+                        {expandedViewMode === 'visualizer' ? <Tv size={13} /> : <Disc size={13} />}
+                        <span className="hidden sm:inline">{expandedViewMode === 'visualizer' ? 'Watch Video' : 'Visualizer'}</span>
+                      </button>
+                    )}
+
                     <button
-                      onClick={() => setIsPlayerExpanded(false)}
-                      className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-xl text-xs transition-all active:scale-95 border border-white/15 flex items-center gap-1.5 font-bold"
+                      onClick={() => {
+                        setActiveSidebar('lyrics');
+                      }}
+                      className="bg-fuchsia-600/30 hover:bg-fuchsia-600 text-fuchsia-200 hover:text-white px-2.5 py-1.5 rounded-xl text-xs transition-all active:scale-95 border border-fuchsia-400/30 flex items-center gap-1.5 font-semibold"
+                      title="Open Synced Apple Lyrics"
+                    >
+                      <Mic2 size={13} />
+                      <span className="hidden sm:inline">Lyrics</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setIsPlayerExpanded(false);
+                        setShowExpandedSearchPopup(false);
+                      }}
+                      className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-xl text-xs transition-all active:scale-95 border border-white/15"
+                      title="Minimize Player"
                     >
                       <Minimize2 size={15} />
-                      <span className="hidden sm:inline">Minimize</span>
                     </button>
                   </div>
                 </div>
 
-                {/* Main Player Display Area */}
-                <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
-                  {/* YouTube Visualizer Lounge */}
-                  {isYouTubeUrl(musicState.currentTrack.url) && (
-                    <div className="text-center space-y-4 p-8">
-                      <div className="w-28 h-28 rounded-full bg-fuchsia-600/20 border border-fuchsia-400/30 flex items-center justify-center mx-auto shadow-2xl text-fuchsia-300 animate-pulse">
-                        <Disc size={56} className="animate-spin text-fuchsia-400" style={{ animationDuration: '4s' }} />
+                {/* ── CENTER STAGE DISPLAY AREA ── */}
+                <div className="flex-1 relative flex items-center justify-center overflow-hidden p-4 sm:p-8">
+                  {/* Visualizer Mode: Big Glowing Vinyl Album Art */}
+                  {expandedViewMode === 'visualizer' && (
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-12 max-w-4xl mx-auto w-full">
+                      {/* Album Art with Vinyl Glow */}
+                      <div className="relative group flex-shrink-0">
+                        <div 
+                          className="w-48 h-48 sm:w-72 sm:h-72 rounded-[32px] overflow-hidden border border-white/20 shadow-[0_20px_60px_rgba(0,0,0,0.6)] relative z-10 transition-transform duration-500 group-hover:scale-105"
+                          style={{
+                            boxShadow: songPalette ? `0 24px 70px ${songPalette.primary}40` : undefined
+                          }}
+                        >
+                          {musicState.currentTrack.thumbnail ? (
+                            <img
+                              src={musicState.currentTrack.thumbnail}
+                              alt={musicState.currentTrack.title}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full bg-gradient-to-br from-fuchsia-600 to-indigo-600 flex items-center justify-center text-white">
+                              <Music size={64} />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Subtle Vinyl Record emerging from behind */}
+                        <div className={`absolute top-2 -right-4 sm:-right-8 w-44 h-44 sm:w-68 sm:h-68 rounded-full bg-[#111] border-4 border-black shadow-2xl flex items-center justify-center z-0 transition-all duration-700 ${
+                          musicState.isPlaying ? 'animate-spin' : ''
+                        }`} style={{ animationDuration: '6s' }}>
+                          <div className="w-16 h-16 rounded-full bg-fuchsia-600/40 border-2 border-white/20 flex items-center justify-center">
+                            <div className="w-4 h-4 rounded-full bg-black" />
+                          </div>
+                        </div>
                       </div>
-                      <div className="space-y-1">
-                        <h3 className="text-2xl font-bold text-white tracking-wide">{musicState.currentTrack.title}</h3>
-                        <p className="text-sm text-fuchsia-300/80">{musicState.currentTrack.artist}</p>
+
+                      {/* Song Details & Apple Typography */}
+                      <div className="flex flex-col items-center sm:items-start text-center sm:text-left space-y-2 min-w-0 max-w-md">
+                        <span className="text-xs text-fuchsia-400 font-bold uppercase tracking-widest flex items-center gap-1.5 bg-fuchsia-500/10 px-3 py-1 rounded-full border border-fuchsia-500/20">
+                          <Radio size={12} className="animate-pulse" />
+                          Synchronized Room Audio
+                        </span>
+                        <h2 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight line-clamp-2">
+                          {musicState.currentTrack.title}
+                        </h2>
+                        <p className="text-base sm:text-lg text-fuchsia-200/80 font-medium line-clamp-1">
+                          {musicState.currentTrack.artist}
+                        </p>
+
+                        {/* Animated Equalizer Wave Bars */}
+                        <div className="flex items-center gap-1 pt-2">
+                          {[40, 70, 90, 60, 100, 50, 80, 60, 95, 45, 75, 55].map((h, i) => (
+                            <div
+                              key={i}
+                              className="w-1 bg-fuchsia-400 rounded-full transition-all duration-300"
+                              style={{
+                                height: musicState.isPlaying ? `${Math.max(6, (h * (0.4 + (i % 3) * 0.2)))}px` : '4px',
+                                opacity: musicState.isPlaying ? 0.9 : 0.3
+                              }}
+                            />
+                          ))}
+                        </div>
                       </div>
                     </div>
                   )}
 
-                  {/* Spotify Player */}
-                  {extractSpotifyInfo(musicState.currentTrack.url) && (
-                    <iframe
-                      src={extractSpotifyInfo(musicState.currentTrack.url)?.embedUrl}
-                      width="100%"
-                      height="100%"
-                      frameBorder="0"
-                      allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                      loading="lazy"
-                      className="w-full h-full p-2"
-                    />
-                  )}
-
-                  {/* Monochrome Lossless Web Frame */}
-                  {isMonochromeUrl(musicState.currentTrack.url) && (
-                    <iframe
-                      src={musicState.currentTrack.url.startsWith('http') ? musicState.currentTrack.url : `https://${musicState.currentTrack.url}`}
-                      width="100%"
-                      height="100%"
-                      frameBorder="0"
-                      allow="autoplay; encrypted-media; fullscreen"
-                      loading="lazy"
-                      className="w-full h-full bg-[#121212]"
-                    />
-                  )}
-
-                  {/* Direct Audio Player Visualizer */}
-                  {!isYouTubeUrl(musicState.currentTrack.url) && !extractSpotifyInfo(musicState.currentTrack.url) && !isMonochromeUrl(musicState.currentTrack.url) && (
-                    <div className="text-center space-y-4 p-8">
-                      <div className="w-24 h-24 rounded-full bg-fuchsia-600/30 border border-fuchsia-400/40 flex items-center justify-center mx-auto shadow-2xl text-fuchsia-300 animate-pulse">
-                        <Disc size={48} className="animate-spin" style={{ animationDuration: '6s' }} />
-                      </div>
-                      <div className="space-y-1">
-                        <h3 className="text-xl font-bold text-white">{musicState.currentTrack.title}</h3>
-                        <p className="text-sm text-white/60">{musicState.currentTrack.artist}</p>
-                      </div>
+                  {/* Video Mode: Live YouTube Video Frame */}
+                  {expandedViewMode === 'video' && isYouTubeUrl(musicState.currentTrack.url) && (
+                    <div className="w-full h-full max-w-4xl max-h-[500px] rounded-3xl overflow-hidden border border-white/20 shadow-2xl bg-black flex items-center justify-center">
+                      <iframe
+                        src={`https://www.youtube-nocookie.com/embed/${extractYouTubeId(musicState.currentTrack.url)}?autoplay=1&enablejsapi=1&playsinline=1`}
+                        className="w-full h-full"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      />
                     </div>
                   )}
                 </div>
 
-                {/* Center Stage Footer: Shared Scrubber for YouTube/Direct Audio OR Stream Tab Audio banner for external web players */}
-                <div className="p-4 border-t border-white/10 bg-white/5 flex flex-col gap-3">
-                  {/* For YouTube & Direct Audio Streams: Live Room Synchronized Timeline Bar */}
-                  {(isYouTubeUrl(musicState.currentTrack.url) || (!extractSpotifyInfo(musicState.currentTrack.url) && !isMonochromeUrl(musicState.currentTrack.url))) ? (
-                    <>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs text-white/60 font-mono w-10 text-right">
-                          {Math.floor(songProgress.current / 60)}:{(Math.floor(songProgress.current % 60)).toString().padStart(2, '0')}
-                        </span>
+                {/* ── BOTTOM PLAYER CONTROLS DOCK ── */}
+                <div className="p-4 sm:p-6 border-t border-white/10 bg-white/5 flex flex-col gap-3.5 backdrop-blur-xl relative z-20">
+                  {/* Real-Time Synced Timeline Bar */}
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-white/70 font-mono w-10 text-right">
+                      {Math.floor(songProgress.current / 60)}:{(Math.floor(songProgress.current % 60)).toString().padStart(2, '0')}
+                    </span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={songProgress.duration > 0 ? songProgress.duration : (musicState.currentTrack?.duration || 240)}
+                      value={songProgress.current}
+                      disabled={!isDjAuthorized}
+                      onMouseDown={() => { if (isDjAuthorized) isSeekingRef.current = true; }}
+                      onTouchStart={() => { if (isDjAuthorized) isSeekingRef.current = true; }}
+                      onChange={(e) => { if (isDjAuthorized) setSongProgress(prev => ({ ...prev, current: parseFloat(e.target.value) })); }}
+                      onMouseUp={(e) => { if (isDjAuthorized) handleSeek(parseFloat((e.target as HTMLInputElement).value)); }}
+                      onTouchEnd={(e) => { if (isDjAuthorized) handleSeek(parseFloat((e.target as HTMLInputElement).value)); }}
+                      className={`flex-1 accent-fuchsia-500 h-2 bg-white/20 rounded-lg transition-all ${isDjAuthorized ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+                      title={isDjAuthorized ? "Scrub timeline (DJ Control)" : "Synced with Room DJ (Enter PIN to unlock)"}
+                    />
+                    <span className="text-xs text-white/70 font-mono w-10">
+                      {Math.floor((songProgress.duration || musicState.currentTrack?.duration || 0) / 60)}:{(Math.floor((songProgress.duration || musicState.currentTrack?.duration || 0) % 60)).toString().padStart(2, '0')}
+                    </span>
+                  </div>
+
+                  {/* Playback Control Buttons */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      {/* Skip Previous */}
+                      <button
+                        onClick={handleSkipPrev}
+                        disabled={!isDjAuthorized}
+                        className={`p-3 rounded-2xl text-xs transition-all border ${isDjAuthorized ? 'bg-white/10 hover:bg-white/20 text-white active:scale-90 border-white/15' : 'bg-white/5 text-white/30 border-white/5 cursor-not-allowed'}`}
+                        title={isDjAuthorized ? "Previous Track" : "Only Host or PIN DJs can skip"}
+                      >
+                        <SkipBack size={18} />
+                      </button>
+
+                      {/* Main Play / Pause Button with Glow Ring */}
+                      <button
+                        onClick={() => {
+                          if (!isDjAuthorized) {
+                            alert('👑 Only the room creator (Host) or users with the 4-digit DJ PIN can control playback.');
+                            return;
+                          }
+                          let currentPos = musicState.lastPosition || 0;
+                          if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
+                            try { currentPos = ytPlayerRef.current.getCurrentTime(); } catch (_) {}
+                          } else if (musicAudioRef.current) {
+                            currentPos = musicAudioRef.current.currentTime;
+                          }
+
+                          if (musicState.isPlaying) {
+                            sendMusicAction('pause', musicState.currentTrackId, currentPos, musicState.currentTrack);
+                          } else {
+                            sendMusicAction('play', musicState.currentTrackId, currentPos, musicState.currentTrack);
+                          }
+                        }}
+                        className={`px-6 py-3 rounded-2xl font-bold transition-all flex items-center gap-2.5 text-sm shadow-xl active:scale-95 ${
+                          isDjAuthorized
+                            ? 'bg-fuchsia-600 hover:bg-fuchsia-500 text-white shadow-fuchsia-950/60 ring-2 ring-fuchsia-400/40'
+                            : 'bg-white/10 text-white/50 cursor-not-allowed'
+                        }`}
+                      >
+                        {musicState.isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+                        <span>{musicState.isPlaying ? 'Pause' : 'Play'}</span>
+                      </button>
+
+                      {/* Skip Next */}
+                      <button
+                        onClick={handleSkipNext}
+                        disabled={!isDjAuthorized}
+                        className={`p-3 rounded-2xl text-xs transition-all border ${isDjAuthorized ? 'bg-white/10 hover:bg-white/20 text-white active:scale-90 border-white/15' : 'bg-white/5 text-white/30 border-white/5 cursor-not-allowed'}`}
+                        title={isDjAuthorized ? "Next Track" : "Only Host or PIN DJs can skip"}
+                      >
+                        <SkipForward size={18} />
+                      </button>
+                    </div>
+
+                    {/* Volume Slider & Library Browse */}
+                    <div className="flex items-center gap-4">
+                      <div className="hidden sm:flex items-center gap-2 bg-white/5 px-3 py-2 rounded-2xl border border-white/10">
+                        <Volume2 size={15} className="text-white/60" />
                         <input
                           type="range"
                           min={0}
-                          max={songProgress.duration > 0 ? songProgress.duration : (musicState.currentTrack?.duration || 240)}
-                          value={songProgress.current}
-                          disabled={!isDjAuthorized}
-                          onMouseDown={() => { if (isDjAuthorized) isSeekingRef.current = true; }}
-                          onTouchStart={() => { if (isDjAuthorized) isSeekingRef.current = true; }}
-                          onChange={(e) => { if (isDjAuthorized) setSongProgress(prev => ({ ...prev, current: parseFloat(e.target.value) })); }}
-                          onMouseUp={(e) => { if (isDjAuthorized) handleSeek(parseFloat((e.target as HTMLInputElement).value)); }}
-                          onTouchEnd={(e) => { if (isDjAuthorized) handleSeek(parseFloat((e.target as HTMLInputElement).value)); }}
-                          className={`flex-1 accent-fuchsia-500 h-1.5 bg-white/20 rounded-lg transition-all ${isDjAuthorized ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
-                          title={isDjAuthorized ? "Scrub timeline (DJ Control)" : "Synced with Room DJ (Enter PIN to unlock)"}
-                        />
-                        <span className="text-xs text-white/60 font-mono w-10">
-                          {Math.floor((songProgress.duration || musicState.currentTrack?.duration || 0) / 60)}:{(Math.floor((songProgress.duration || musicState.currentTrack?.duration || 0) % 60)).toString().padStart(2, '0')}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={handleSkipPrev}
-                            disabled={!isDjAuthorized}
-                            className={`p-2 rounded-xl text-xs transition-all border ${isDjAuthorized ? 'bg-white/10 hover:bg-white/20 text-white active:scale-95 border-white/15' : 'bg-white/5 text-white/30 border-white/5 cursor-not-allowed'}`}
-                            title={isDjAuthorized ? "Previous Track" : "Only Host or PIN-Authorized DJs can change tracks"}
-                          >
-                            <SkipBack size={14} />
-                          </button>
-
-                          <button
-                            onClick={() => {
-                              if (!isDjAuthorized) {
-                                alert('👑 Only the room creator (Host) or users with the 4-digit DJ PIN can control playback.');
-                                return;
-                              }
-                              let currentPos = musicState.lastPosition || 0;
-                              if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
-                                try { currentPos = ytPlayerRef.current.getCurrentTime(); } catch (_) {}
-                              } else if (musicAudioRef.current) {
-                                currentPos = musicAudioRef.current.currentTime;
-                              }
-
-                              if (musicState.isPlaying) {
-                                sendMusicAction('pause', musicState.currentTrackId, currentPos, musicState.currentTrack);
-                              } else {
-                                sendMusicAction('play', musicState.currentTrackId, currentPos, musicState.currentTrack);
-                              }
-                            }}
-                            className={`px-4 py-2 rounded-xl font-bold transition-all flex items-center gap-2 text-xs shadow-md ${
-                              isDjAuthorized
-                                ? 'bg-fuchsia-600 hover:bg-fuchsia-500 text-white active:scale-95 shadow-fuchsia-950/40'
-                                : 'bg-white/10 text-white/50 cursor-not-allowed'
-                            }`}
-                            title={isDjAuthorized ? "Play/Pause" : "Controlled by Room Host (Enter PIN to unlock)"}
-                          >
-                            {musicState.isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
-                            <span>{isDjAuthorized ? (musicState.isPlaying ? 'Pause for Room' : 'Play for Room') : (musicState.isPlaying ? 'Playing (Host Controlled)' : 'Paused (Host Controlled)')}</span>
-                          </button>
-
-                          <button
-                            onClick={handleSkipNext}
-                            disabled={!isDjAuthorized}
-                            className={`p-2 rounded-xl text-xs transition-all border ${isDjAuthorized ? 'bg-white/10 hover:bg-white/20 text-white active:scale-95 border-white/15' : 'bg-white/5 text-white/30 border-white/5 cursor-not-allowed'}`}
-                            title={isDjAuthorized ? "Next Track" : "Only Host or PIN-Authorized DJs can change tracks"}
-                          >
-                            <SkipForward size={14} />
-                          </button>
-                        </div>
-
-                        <button
-                          onClick={() => {
-                            setActiveSidebar('music');
-                            setIsPlayerExpanded(false);
+                          max={1}
+                          step={0.01}
+                          value={musicVolume}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            if (musicAudioRef.current) musicAudioRef.current.volume = v;
+                            if (ytPlayerRef.current && ytPlayerReadyRef.current) {
+                              try { ytPlayerRef.current.setVolume(Math.round(v * 100)); } catch (_) {}
+                            }
                           }}
-                          className="text-xs text-fuchsia-300 hover:text-fuchsia-200 flex items-center gap-1.5 font-semibold bg-white/5 hover:bg-white/10 px-3 py-2 rounded-xl border border-white/10 transition-all"
-                        >
-                          <Music size={13} />
-                          <span>Browse Songs & Playlists</span>
-                        </button>
+                          className="w-20 accent-fuchsia-500 h-1.5 bg-white/20 rounded-lg cursor-pointer"
+                        />
                       </div>
-                    </>
-                  ) : (
-                    /* For External Web Players (Monochrome / Spotify): 1-Click Stream Desktop Audio Banner */
-                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 py-1">
-                      <div className="flex items-center gap-2 text-xs text-white/80">
-                        <Sparkles size={16} className="text-emerald-400 flex-shrink-0" />
-                        <span>Use the player controls inside the window above to play, or stream lossless audio to your partner:</span>
-                      </div>
+
                       <button
                         onClick={() => {
+                          setActiveSidebar('music');
                           setIsPlayerExpanded(false);
-                          toggleScreenShare();
                         }}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all active:scale-95 shadow-md shadow-emerald-950/40 flex items-center gap-2 flex-shrink-0"
+                        className="text-xs text-fuchsia-300 hover:text-fuchsia-200 flex items-center gap-1.5 font-bold bg-white/10 hover:bg-white/20 px-4 py-2.5 rounded-2xl border border-white/15 transition-all active:scale-95"
                       >
-                        <Monitor size={14} />
-                        <span>Stream Audio to Room</span>
+                        <Music size={14} />
+                        <span>Music Hub</span>
                       </button>
                     </div>
-                  )}
+                  </div>
                 </div>
+
               </div>
             </div>
           )}
