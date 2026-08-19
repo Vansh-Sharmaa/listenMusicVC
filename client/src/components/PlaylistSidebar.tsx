@@ -5,7 +5,7 @@ import { useSocket } from '../context/SocketContext';
 import { useAudioMixer } from '../context/AudioMixerContext';
 import { Play, Pause, Music, Upload, Loader2, Plus, Volume2, Link as LinkIcon, Radio, Share2 } from 'lucide-react';
 
-import { parseMediaUrl, extractYouTubeId, isYouTubeUrl } from '../utils/mediaPlatform';
+import { parseMediaUrl, extractYouTubeId, isYouTubeUrl, isSpotifyUrl, isMonochromeUrl } from '../utils/mediaPlatform';
 
 interface MusicTrack {
   id: string;
@@ -435,7 +435,14 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
         ) : (
           tracks.map((track) => {
             const isCurrent = track.id === musicState.currentTrackId;
-            const isYT = isYouTubeUrl(track.url);
+            const badge = isYouTubeUrl(track.url)
+              ? { label: 'YOUTUBE', color: 'bg-red-500/20 text-red-300 border-red-500/30' }
+              : isSpotifyUrl(track.url)
+              ? { label: 'SPOTIFY', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' }
+              : isMonochromeUrl(track.url)
+              ? { label: 'MONOCHROME', color: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' }
+              : { label: 'LOSSLESS', color: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30' };
+
             return (
               <button
                 key={track.id}
@@ -465,12 +472,8 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
                     {track.artist}
                   </span>
                 </div>
-                <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase font-bold ${
-                  isYT 
-                    ? 'bg-red-500/20 text-red-300 border border-red-500/30'
-                    : 'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30'
-                }`}>
-                  {isYT ? 'YOUTUBE' : 'AUDIO'}
+                <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase font-bold border ${badge.color}`}>
+                  {badge.label}
                 </span>
               </button>
             );
