@@ -569,26 +569,31 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   const isSeekingRef = useRef<boolean>(false);
   const isLocalTriggeredRef = useRef<boolean>(false);
 
-  // Periodic smooth UI progress updater
+  // High-precision smooth UI progress updater (60fps animation frame loop for butter-smooth lyrics sync)
   useEffect(() => {
-    const updateTime = () => {
-      if (isSeekingRef.current) return;
-      if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
-        try {
-          const cur = ytPlayerRef.current.getCurrentTime() || 0;
-          const dur = ytPlayerRef.current.getDuration() || (musicState.currentTrack?.duration || 0);
-          setSongProgress({ current: cur, duration: dur });
-        } catch (_) {}
-      } else if (musicAudioRef.current) {
-        setSongProgress({
-          current: musicAudioRef.current.currentTime || 0,
-          duration: musicAudioRef.current.duration || (musicState.currentTrack?.duration || 0)
-        });
+    let animFrameId: number;
+
+    const updatePrecisionTime = () => {
+      if (!isSeekingRef.current) {
+        if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
+          try {
+            const cur = ytPlayerRef.current.getCurrentTime() || 0;
+            const dur = ytPlayerRef.current.getDuration() || (musicState.currentTrack?.duration || 0);
+            setSongProgress({ current: cur, duration: dur });
+          } catch (_) {}
+        } else if (musicAudioRef.current) {
+          setSongProgress({
+            current: musicAudioRef.current.currentTime || 0,
+            duration: musicAudioRef.current.duration || (musicState.currentTrack?.duration || 0)
+          });
+        }
       }
+
+      animFrameId = requestAnimationFrame(updatePrecisionTime);
     };
 
-    const interval = setInterval(updateTime, 500);
-    return () => clearInterval(interval);
+    animFrameId = requestAnimationFrame(updatePrecisionTime);
+    return () => cancelAnimationFrame(animFrameId);
   }, [musicState]);
 
   // Handle user seeking on the shared timeline bar
