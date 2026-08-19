@@ -1711,15 +1711,16 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
                 {/* Main Player Display Area */}
                 <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
-                  {/* YouTube Player */}
+                  {/* YouTube Visualizer Lounge */}
                   {isYouTubeUrl(musicState.currentTrack.url) && (
-                    <div className="w-full h-full aspect-video flex items-center justify-center">
-                      <iframe
-                        src={`https://www.youtube.com/embed/${extractYouTubeId(musicState.currentTrack.url)}?autoplay=1&enablejsapi=1`}
-                        className="w-full h-full border-0"
-                        allow="autoplay; encrypted-media; picture-in-picture"
-                        allowFullScreen
-                      />
+                    <div className="text-center space-y-4 p-8">
+                      <div className="w-28 h-28 rounded-full bg-fuchsia-600/20 border border-fuchsia-400/30 flex items-center justify-center mx-auto shadow-2xl text-fuchsia-300 animate-pulse">
+                        <Disc size={56} className="animate-spin text-fuchsia-400" style={{ animationDuration: '4s' }} />
+                      </div>
+                      <div className="space-y-1">
+                        <h3 className="text-2xl font-bold text-white tracking-wide">{musicState.currentTrack.title}</h3>
+                        <p className="text-sm text-fuchsia-300/80">{musicState.currentTrack.artist}</p>
+                      </div>
                     </div>
                   )}
 
