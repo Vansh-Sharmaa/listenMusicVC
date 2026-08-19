@@ -58,6 +58,8 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
   const [loading, setLoading] = useState<boolean>(false);
   const [syncOffset, setSyncOffset] = useState<number>(0.0);
   const [songPalette, setSongPalette] = useState<SongColorPalette | null>(null);
+  const [showPronunciation, setShowPronunciation] = useState<boolean>(true);
+  const [showTranslation, setShowTranslation] = useState<boolean>(true);
 
   // High-precision clock extrapolation
   const lastAuthoritativeTimeRef = useRef<{ time: number; perfNow: number }>({
@@ -73,6 +75,7 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
   const wordRefs = useRef<(HTMLSpanElement | null)[][]>([]);
+  const bgWordRefs = useRef<(HTMLSpanElement | null)[][][]>([]);
   const cleanLinesRef = useRef<LyricLine[]>([]);
 
   const geometryCacheRef = useRef<{ lineTops: number[]; lineHeights: number[]; containerHeight: number }>({
@@ -141,15 +144,14 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
     return () => { isMounted = false; };
   }, [currentTrack?.title, currentTrack?.artist]);
 
-  // Clean lines: filter translation lines and deduplicate
-  const cleanLines: LyricLine[] = useMemo(() => {
+  // Clean lines: keep valid lines and deduplicate consecutive duplicates
+  const cleanLines = useMemo(() => {
     if (!lyricsData?.lines) return [];
     const result: LyricLine[] = [];
     const seen = new Set<string>();
     for (const line of lyricsData.lines) {
       const t = line.text.trim();
       if (!t) continue;
-      if (/[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/.test(t)) continue;
       const lower = t.toLowerCase();
       if (seen.has(lower) && result.length > 0 && result[result.length - 1].text.toLowerCase() === lower) continue;
       seen.add(lower);
@@ -158,6 +160,9 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
     cleanLinesRef.current = result;
     return result;
   }, [lyricsData]);
+
+  const hasPronunciation = useMemo(() => cleanLines.some(l => Boolean(l.romanizedText)), [cleanLines]);
+  const hasTranslation = useMemo(() => cleanLines.some(l => Boolean(l.translation)), [cleanLines]);
 
   // Measure and cache layout geometry
   const updateGeometryCache = useCallback(() => {
@@ -394,6 +399,62 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
             span.style.filter = 'none';
           }
         }
+
+        // Paint background vocal / ad-lib words
+        if (line.backgroundVocals && bgWordRefs.current[cur]) {
+          const bgPrimary = light ? '#1f2937' : 'rgba(255,255,255,0.85)';
+          const bgSecondary = light ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.22)';
+
+          for (let bgIdx = 0; bgIdx < line.backgroundVocals.length; bgIdx++) {
+            const bgVocal = line.backgroundVocals[bgIdx];
+            const bgWords = bgVocal.words || [];
+            const bgSpans = bgWordRefs.current[cur]?.[bgIdx] || [];
+
+            for (let bwIdx = 0; bwIdx < bgWords.length; bwIdx++) {
+              const bw = bgWords[bwIdx];
+              const bSpan = bgSpans[bwIdx];
+              if (!bSpan) continue;
+
+              const preWipeStart = bw.startTime - WORD_PRE_WIPE_LEAD_SEC;
+
+              if (nowSecs < preWipeStart) {
+                bSpan.style.background = 'none';
+                bSpan.style.backgroundColor = bgSecondary;
+                (bSpan.style as any).webkitBackgroundClip = 'text';
+                bSpan.style.backgroundClip = 'text';
+                (bSpan.style as any).webkitTextFillColor = 'transparent';
+                bSpan.style.fontWeight = '600';
+                bSpan.style.transform = 'translate3d(0, 0, 0)';
+              } else if (nowSecs >= bw.endTime) {
+                bSpan.style.background = 'none';
+                bSpan.style.backgroundColor = bgPrimary;
+                (bSpan.style as any).webkitBackgroundClip = 'text';
+                bSpan.style.backgroundClip = 'text';
+                (bSpan.style as any).webkitTextFillColor = 'transparent';
+                bSpan.style.fontWeight = '700';
+                bSpan.style.transform = `translate3d(0, ${CHAR_RISE_Y}, 0)`;
+              } else {
+                const wordDuration = Math.max(0.05, bw.endTime - bw.startTime);
+                const rawProgress = Math.max(0, Math.min(1, (nowSecs - bw.startTime) / wordDuration));
+                const progress = rawProgress < 0.5
+                  ? 2 * rawProgress * rawProgress
+                  : -1 + (4 - 2 * rawProgress) * rawProgress;
+                const wipeSizePct = Math.min(100, Math.max(0, progress * 100));
+
+                bSpan.style.backgroundColor = bgSecondary;
+                bSpan.style.backgroundImage = `linear-gradient(90deg, ${bgPrimary} 0%, ${bgPrimary} calc(100% - ${WIPE_GRADIENT_WIDTH_EM}em), transparent 100%)`;
+                bSpan.style.backgroundRepeat = 'no-repeat';
+                bSpan.style.backgroundPosition = 'left';
+                bSpan.style.backgroundSize = `${wipeSizePct}% 100%`;
+                (bSpan.style as any).webkitBackgroundClip = 'text';
+                bSpan.style.backgroundClip = 'text';
+                (bSpan.style as any).webkitTextFillColor = 'transparent';
+                bSpan.style.fontWeight = '700';
+                bSpan.style.transform = `translate3d(0, ${CHAR_RISE_Y}, 0)`;
+              }
+            }
+          }
+        }
       }
 
       rafRef.current = requestAnimationFrame(paint);
@@ -488,6 +549,34 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
                 760
               </button>
             </div>
+          )}
+
+          {/* Quick Pronunciation (Romaji) & Translation Toggles */}
+          {hasPronunciation && (
+            <button
+              onClick={() => setShowPronunciation(p => !p)}
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all active:scale-95 ${
+                showPronunciation
+                  ? 'bg-fuchsia-600 border-fuchsia-500 text-white shadow-sm'
+                  : 'bg-white/10 border-white/10 text-white/50 hover:text-white'
+              }`}
+              title="Toggle Pronunciation / Romanization Guide"
+            >
+              Romaji
+            </button>
+          )}
+          {hasTranslation && (
+            <button
+              onClick={() => setShowTranslation(p => !p)}
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all active:scale-95 ${
+                showTranslation
+                  ? 'bg-fuchsia-600 border-fuchsia-500 text-white shadow-sm'
+                  : 'bg-white/10 border-white/10 text-white/50 hover:text-white'
+              }`}
+              title="Toggle English Translation Subtitles"
+            >
+              Trans
+            </button>
           )}
 
           {/* Sync Offset Controls */}
@@ -585,8 +674,19 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
                     }}
                     className="w-full text-left focus:outline-none cursor-pointer group"
                   >
+                    {/* Pronunciation / Romanization Guide (Above Main Line) */}
+                    {showPronunciation && line.romanizedText && (
+                      <div className="text-[11px] sm:text-xs font-semibold uppercase tracking-wider opacity-65 mb-0.5 text-fuchsia-300/80 select-none">
+                        {line.romanizedText}
+                      </div>
+                    )}
+
                     <p
-                      className="text-xl sm:text-2xl md:text-[2.1rem] leading-[1.32] tracking-[-0.025em] m-0 break-words"
+                      className={`${
+                        line.isBackgroundVocal
+                          ? 'text-lg sm:text-xl md:text-[1.55rem] leading-[1.3] font-semibold opacity-85'
+                          : 'text-xl sm:text-2xl md:text-[2.1rem] leading-[1.32] font-bold'
+                      } tracking-[-0.025em] m-0 break-words`}
                       style={{
                         fontFamily: "var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
                         color: isLight ? 'rgba(0,0,0,0.30)' : 'rgba(255,255,255,0.30)',
@@ -598,7 +698,7 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
                           ref={el => { wordRefs.current[lineIndex][wIdx] = el; }}
                           className="inline-block mr-[0.28em] transition-transform duration-300"
                           style={{
-                            fontWeight: 700,
+                            fontWeight: line.isBackgroundVocal ? 600 : 700,
                             color: 'transparent',
                             backgroundColor: isLight ? 'rgba(0,0,0,0.30)' : 'rgba(255,255,255,0.30)',
                             WebkitBackgroundClip: 'text',
@@ -609,6 +709,52 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
                         </span>
                       ))}
                     </p>
+
+                    {/* Apple Music Nested Background Vocals / Ad-Libs */}
+                    {line.backgroundVocals && line.backgroundVocals.map((bgVocal, bgIdx) => {
+                      const bgWords = bgVocal.words || [{ text: bgVocal.text, startTime: bgVocal.time, endTime: bgVocal.endTime || bgVocal.time + 3 }];
+                      return (
+                        <div
+                          key={`bg-${bgIdx}`}
+                          className="text-base sm:text-lg md:text-[1.35rem] leading-[1.28] tracking-[-0.015em] mt-1.5 break-words opacity-90 pl-1"
+                          style={{
+                            fontFamily: "var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+                            color: isLight ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.22)',
+                          }}
+                        >
+                          {bgWords.map((bw, bwIdx) => (
+                            <span
+                              key={`bg-${bw.startTime}-${bwIdx}`}
+                              ref={el => {
+                                if (!bgWordRefs.current[lineIndex]) bgWordRefs.current[lineIndex] = [];
+                                if (!bgWordRefs.current[lineIndex][bgIdx]) bgWordRefs.current[lineIndex][bgIdx] = [];
+                                bgWordRefs.current[lineIndex][bgIdx][bwIdx] = el;
+                              }}
+                              className="inline-block mr-[0.25em] transition-transform duration-300"
+                              style={{
+                                fontWeight: 600,
+                                color: 'transparent',
+                                backgroundColor: isLight ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.22)',
+                                WebkitBackgroundClip: 'text',
+                                backgroundClip: 'text',
+                              }}
+                            >
+                              {bw.text}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    })}
+
+                    {/* Translation Guide (Below Main Line) */}
+                    {showTranslation && line.translation && (
+                      <div
+                        className="text-xs sm:text-sm md:text-[1.05rem] font-medium leading-[1.3] opacity-75 mt-1 tracking-normal select-none italic"
+                        style={{ color: isLight ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.55)' }}
+                      >
+                        {line.translation}
+                      </div>
+                    )}
                   </button>
                 </div>
               );

@@ -13,11 +13,22 @@ export interface LyricWord {
   endTime: number;   // in seconds
 }
 
+export interface BackgroundVocal {
+  text: string;
+  time: number;
+  endTime?: number;
+  words?: LyricWord[];
+}
+
 export interface LyricLine {
   time: number; // in seconds (start time of line)
   endTime?: number;
   text: string;
   words?: LyricWord[];
+  isBackgroundVocal?: boolean;
+  backgroundVocals?: BackgroundVocal[];
+  romanizedText?: string; // Pronunciation / Romaji / Pinyin guide
+  translation?: string;   // Meaning / English translation guide
 }
 
 export interface LyricsData {
@@ -53,32 +64,77 @@ function parseTimestamp(timeStr: string): number | null {
 }
 
 /**
+ * Helper to extract word spans from TTML XML fragment
+ */
+function extractWordsFromTTMLFragment(fragment: string, defaultStart: number, defaultEnd: number): LyricWord[] {
+  const spanRegex = /<span\s+[^>]*begin="([^"]+)"(?:\s+[^>]*end="([^"]+)")?[^>]*>([^<]+)<\/span>/gi;
+  const words: LyricWord[] = [];
+  let spanMatch;
+
+  while ((spanMatch = spanRegex.exec(fragment)) !== null) {
+    const sBegin = parseTimestamp(spanMatch[1]);
+    const sEnd = spanMatch[2] ? parseTimestamp(spanMatch[2]) : (sBegin ? sBegin + 0.5 : 0);
+    const text = spanMatch[3].trim();
+    if (sBegin !== null && text) {
+      words.push({ text, startTime: sBegin, endTime: sEnd || sBegin + 0.4 });
+    }
+  }
+
+  if (words.length === 0) {
+    const cleanText = fragment.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    if (cleanText) {
+      const rawWords = cleanText.split(/\s+/).filter(Boolean);
+      const vocalDuration = Math.max(0.4, defaultEnd - defaultStart);
+      const totalChars = rawWords.reduce((sum, w) => sum + Math.max(1, w.length), 0);
+      let curStart = defaultStart;
+
+      rawWords.forEach(w => {
+        const dur = (Math.max(1, w.length) / totalChars) * vocalDuration;
+        words.push({
+          text: w,
+          startTime: Math.round(curStart * 1000) / 1000,
+          endTime: Math.round((curStart + dur) * 1000) / 1000
+        });
+        curStart += dur;
+      });
+    }
+  }
+
+  return words;
+}
+
+/**
  * Generate natural, syllable/character-weighted word timestamps for lines that only have line-level timing.
  */
 export function generateWordTimestamps(lines: LyricLine[], totalDuration?: number): LyricLine[] {
   return lines.map((line, idx) => {
     // If words are already parsed with timestamps (e.g. from enhanced LRC or TTML), keep them
-    if (line.words && line.words.length > 0) return line;
+    if (line.words && line.words.length > 0) {
+      return line;
+    }
 
     const rawWords = line.text.trim().split(/\s+/).filter(Boolean);
-    if (rawWords.length === 0) return line;
+    if (!rawWords.length) return line;
 
-    const nextLine = lines[idx + 1];
     const lineStart = line.time;
-    // Estimate line duration: up to next line (capped at 7s) or default 4.0s
-    let lineDur = nextLine ? Math.max(0.8, nextLine.time - lineStart) : 4.0;
-    if (lineDur > 8.0) lineDur = Math.min(6.0, 1.2 + rawWords.length * 0.45);
-    const lineEnd = lineStart + lineDur;
+    const nextLine = lines[idx + 1];
+    let lineEnd: number;
 
-    // Weight words by length and syllable count
-    const weights = rawWords.map(w => {
-      const len = w.replace(/[^a-zA-Z0-9]/g, '').length || 1;
-      // Bonus weight for longer words
-      return Math.max(1, len);
-    });
-    const totalWeight = weights.reduce((acc, w) => acc + w, 0);
+    if (line.endTime && line.endTime > lineStart) {
+      lineEnd = line.endTime;
+    } else if (nextLine && nextLine.time > lineStart) {
+      const gap = nextLine.time - lineStart;
+      lineEnd = gap > 8 ? lineStart + 4.5 : lineStart + gap * 0.88;
+    } else {
+      lineEnd = totalDuration && totalDuration > lineStart
+        ? Math.min(lineStart + 5.0, totalDuration)
+        : lineStart + 4.0;
+    }
 
-    // Leave a small 10% breathing buffer at the end of the line
+    const lineDur = Math.max(0.5, lineEnd - lineStart);
+    const weights = rawWords.map(w => Math.max(1, w.length));
+    const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+
     const vocalDuration = lineDur * 0.90;
     let currentWordStart = lineStart;
 
@@ -103,51 +159,89 @@ export function generateWordTimestamps(lines: LyricLine[], totalDuration?: numbe
 }
 
 /**
- * Parses TTML (Timed Text Markup Language) XML strings
+ * Parses TTML (Timed Text Markup Language) XML strings with Apple Music background vocal / ad-lib support
  */
 export function parseTTML(ttmlText: string): LyricLine[] {
-  if (!ttmlText || !ttmlText.includes('<p') && !ttmlText.includes('<span')) return [];
+  if (!ttmlText || (!ttmlText.includes('<p') && !ttmlText.includes('<span'))) return [];
 
   const lines: LyricLine[] = [];
-  // Regex to extract <p begin="..." end="...">...</p>
-  const pRegex = /<p\s+[^>]*begin="([^"]+)"(?:\s+[^>]*end="([^"]+)")?[^>]*>([\s\S]*?)<\/p>/gi;
+  const pRegex = /<p\s+([^>]*)>([\s\S]*?)<\/p>/gi;
   let pMatch;
 
   while ((pMatch = pRegex.exec(ttmlText)) !== null) {
-    const pBegin = parseTimestamp(pMatch[1]);
-    const pEnd = pMatch[2] ? parseTimestamp(pMatch[2]) : undefined;
-    const innerContent = pMatch[3];
+    const pAttributes = pMatch[1];
+    const innerContent = pMatch[2];
 
+    const beginMatch = pAttributes.match(/begin="([^"]+)"/i);
+    const endMatch = pAttributes.match(/end="([^"]+)"/i);
+    const isLineBg = /ttm:role="x-bg"/i.test(pAttributes);
+
+    if (!beginMatch) continue;
+    const pBegin = parseTimestamp(beginMatch[1]);
+    const pEnd = endMatch ? parseTimestamp(endMatch[1]) : (pBegin !== null ? pBegin + 4.0 : undefined);
     if (pBegin === null) continue;
 
-    // Check for inner word-level spans <span begin="..." end="...">word</span>
-    const spanRegex = /<span\s+[^>]*begin="([^"]+)"(?:\s+[^>]*end="([^"]+)")?[^>]*>([^<]+)<\/span>/gi;
-    const words: LyricWord[] = [];
-    let spanMatch;
+    // Check if inner content contains background vocal span <span ... ttm:role="x-bg">...</span>
+    const bgSpanRegex = /<span\s+[^>]*ttm:role="x-bg"[^>]*>([\s\S]*?)<\/span>/gi;
+    const backgroundVocals: BackgroundVocal[] = [];
+    let bgMatch;
+    let mainContent = innerContent;
 
-    while ((spanMatch = spanRegex.exec(innerContent)) !== null) {
-      const sBegin = parseTimestamp(spanMatch[1]);
-      const sEnd = spanMatch[2] ? parseTimestamp(spanMatch[2]) : (sBegin ? sBegin + 0.5 : 0);
-      const text = spanMatch[3].trim();
-      if (sBegin !== null && text) {
-        words.push({ text, startTime: sBegin, endTime: sEnd || sBegin + 0.4 });
+    while ((bgMatch = bgSpanRegex.exec(innerContent)) !== null) {
+      const bgInner = bgMatch[1];
+      const bgClean = bgInner.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+      if (bgClean) {
+        const bgWords = extractWordsFromTTMLFragment(bgInner, pBegin, pEnd ?? (pBegin + 3.5));
+        const bgStart = bgWords.length > 0 ? bgWords[0].startTime : pBegin;
+        const bgEnd = bgWords.length > 0 ? bgWords[bgWords.length - 1].endTime : (pEnd ?? pBegin + 3.5);
+        backgroundVocals.push({
+          text: bgClean,
+          time: bgStart,
+          endTime: bgEnd,
+          words: bgWords
+        });
       }
     }
 
-    // Clean pure text
-    const cleanText = innerContent.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-    if (cleanText) {
+    // Strip background vocal spans to extract pure main vocal line
+    mainContent = mainContent.replace(/<span\s+[^>]*ttm:role="x-bg"[^>]*>[\s\S]*?<\/span>/gi, '');
+
+    const mainWords = extractWordsFromTTMLFragment(mainContent, pBegin, pEnd ?? (pBegin + 4.0));
+    const mainClean = mainContent.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+
+    // Extract pronunciation/romanization or translation guides if available in TTML metadata
+    const romanizedMatch = pAttributes.match(/(?:itunes:)?romanized(?:Text)?="([^"]+)"/i) || innerContent.match(/itunes:romanizedText="([^"]+)"/i);
+    const translationMatch = pAttributes.match(/(?:itunes:)?translation="([^"]+)"/i) || innerContent.match(/itunes:translation="([^"]+)"/i);
+    const romanizedText = romanizedMatch ? romanizedMatch[1].trim() : undefined;
+    const translation = translationMatch ? translationMatch[1].trim() : undefined;
+
+    if (mainClean) {
       lines.push({
         time: pBegin,
         endTime: pEnd ?? (pBegin + 4.0),
-        text: cleanText,
-        words: words.length > 0 ? words : undefined
+        text: mainClean,
+        words: mainWords.length > 0 ? mainWords : undefined,
+        isBackgroundVocal: isLineBg,
+        backgroundVocals: backgroundVocals.length > 0 ? backgroundVocals : undefined,
+        romanizedText,
+        translation
+      });
+    } else if (backgroundVocals.length > 0) {
+      // Entire line was background vocal
+      const firstBg = backgroundVocals[0];
+      lines.push({
+        time: firstBg.time,
+        endTime: firstBg.endTime ?? (firstBg.time + 3.5),
+        text: firstBg.text,
+        words: firstBg.words,
+        isBackgroundVocal: true,
+        romanizedText,
+        translation
       });
     }
   }
 
   const sorted = lines.sort((a, b) => a.time - b.time);
-  // If lines don't have word spans, generate natural word timestamps
   const needsWordTimings = sorted.some(l => !l.words || l.words.length === 0);
   if (needsWordTimings) {
     return generateWordTimestamps(sorted);
