@@ -1,8 +1,9 @@
-'use client';
+﻿'use client';
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { fetchLyrics, LyricsData, LyricLine } from '../utils/lyrics';
-import { Mic2, Loader2, Sparkles, Music2, Disc } from 'lucide-react';
+import { motion } from 'motion/react';
+import { Mic2, Loader2, Music2, Disc } from 'lucide-react';
 
 interface LyricsViewProps {
   currentTrack: {
@@ -20,6 +21,92 @@ interface LyricsViewProps {
   isFloating?: boolean;
 }
 
+const SPRING_CFG = { type: 'spring', stiffness: 280, damping: 32, mass: 0.9 } as const;
+
+// Active line with real word-by-word progressive glow
+const ActiveLyricLine = React.memo(function ActiveLyricLine({
+  line,
+  nextLineTime,
+  currentTime,
+  isLight,
+  onSeek,
+}: {
+  line: LyricLine;
+  nextLineTime: number | undefined;
+  currentTime: number;
+  isLight: boolean;
+  onSeek: (t: number) => void;
+}) {
+  const words = useMemo(() => line.text.split(/(\s+)/), [line.text]);
+  const nonSpaceWords = useMemo(() => words.filter(w => w.trim().length > 0), [words]);
+  const totalWords = nonSpaceWords.length || 1;
+
+  const lineDuration = nextLineTime ? Math.max(1.2, nextLineTime - line.time) : 4.0;
+  const elapsed = Math.max(0, currentTime - line.time);
+  const rawProgress = Math.min(totalWords, (elapsed / lineDuration) * (totalWords + 0.5));
+
+  let wordIdx = 0;
+
+  return (
+    <motion.button
+      onClick={() => onSeek(line.time)}
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0, scale: 1.025 }}
+      transition={SPRING_CFG}
+      className="w-full text-left relative py-2 px-3 rounded-2xl focus:outline-none select-none z-10"
+      style={{ transformOrigin: 'left center', filter: 'blur(0px)' }}
+    >
+      <p className="text-xl md:text-3xl leading-relaxed tracking-tight font-black m-0">
+        {words.map((word, wIdx) => {
+          if (word.trim().length === 0) {
+            return <span key={wIdx}>{word}</span>;
+          }
+
+          const myWordIdx = wordIdx++;
+          const progress = rawProgress - myWordIdx;
+          const isFullyLit = progress >= 1;
+          const isCurrentWord = progress > 0 && progress < 1;
+          const clampedPct = Math.max(0, Math.min(1, progress));
+
+          return (
+            <span
+              key={wIdx}
+              className="inline-block"
+              style={{
+                color: isLight
+                  ? isFullyLit
+                    ? 'rgba(0,0,0,0.96)'
+                    : isCurrentWord
+                    ? `rgba(0,0,0,${0.3 + clampedPct * 0.66})`
+                    : 'rgba(0,0,0,0.28)'
+                  : isFullyLit
+                  ? 'rgba(255,255,255,0.98)'
+                  : isCurrentWord
+                  ? `rgba(255,255,255,${0.28 + clampedPct * 0.70})`
+                  : 'rgba(255,255,255,0.28)',
+                textShadow: isLight
+                  ? isFullyLit
+                    ? '0 0 14px rgba(0,0,0,0.5)'
+                    : isCurrentWord
+                    ? `0 0 ${4 + clampedPct * 12}px rgba(0,0,0,${0.1 + clampedPct * 0.4})`
+                    : 'none'
+                  : isFullyLit
+                  ? '0 0 22px rgba(255,255,255,0.85), 0 0 40px rgba(255,255,255,0.3)'
+                  : isCurrentWord
+                  ? `0 0 ${6 + clampedPct * 20}px rgba(255,255,255,${0.1 + clampedPct * 0.8})`
+                  : 'none',
+                transition: 'color 0.2s linear, text-shadow 0.2s linear',
+              }}
+            >
+              {word}
+            </span>
+          );
+        })}
+      </p>
+    </motion.button>
+  );
+});
+
 export const LyricsView: React.FC<LyricsViewProps> = ({
   currentTrack,
   currentTime,
@@ -27,7 +114,7 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
   theme = 'dark',
   onSeek,
   onClose,
-  isFloating = false
+  isFloating = false,
 }) => {
   const isLight = theme === 'light';
   const [lyrics, setLyrics] = useState<LyricsData | null>(null);
@@ -36,82 +123,46 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
   const [userIsScrolling, setUserIsScrolling] = useState<boolean>(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const lineRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  // 1. Fetch lyrics whenever currentTrack changes
   useEffect(() => {
     if (!currentTrack?.title) {
       setLyrics(null);
       return;
     }
-
     let isMounted = true;
     setLoading(true);
     setActiveLineIndex(-1);
-
     fetchLyrics(currentTrack.title, currentTrack.artist, currentTrack.duration)
       .then((data) => {
-        if (isMounted) {
-          setLyrics(data);
-          setLoading(false);
-        }
+        if (isMounted) { setLyrics(data); setLoading(false); }
       })
-      .catch(() => {
-        if (isMounted) setLoading(false);
-      });
-
-    return () => {
-      isMounted = false;
-    };
+      .catch(() => { if (isMounted) setLoading(false); });
+    return () => { isMounted = false; };
   }, [currentTrack?.title, currentTrack?.artist]);
 
-  // 2. Find active lyric line based on current playback timestamp
   useEffect(() => {
     if (!lyrics || !lyrics.lines.length) return;
-
     let currentIndex = -1;
     for (let i = 0; i < lyrics.lines.length; i++) {
-      if (currentTime >= lyrics.lines[i].time) {
-        currentIndex = i;
-      } else {
-        break;
-      }
+      if (currentTime >= lyrics.lines[i].time) { currentIndex = i; } else { break; }
     }
-
     setActiveLineIndex(currentIndex);
   }, [currentTime, lyrics]);
 
-  // 3. Smooth auto-scroll active lyric into center view (unless user is actively dragging/scrolling)
   useEffect(() => {
     if (userIsScrolling || activeLineIndex < 0) return;
-
-    const activeEl = lineRefs.current[activeLineIndex];
-    if (activeEl && containerRef.current) {
-      activeEl.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center'
-      });
+    const el = lineRefs.current[activeLineIndex];
+    if (el && containerRef.current) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, [activeLineIndex, userIsScrolling]);
 
-  // Handle user manual scroll pause
-  const handleScroll = () => {
+  const handleScroll = useCallback(() => {
     setUserIsScrolling(true);
     if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-    scrollTimeoutRef.current = setTimeout(() => {
-      setUserIsScrolling(false);
-    }, 2800);
-  };
-
-  // Calculate dynamic singing progress percentage through current line
-  const activeLineProgress = useMemo(() => {
-    if (!lyrics || activeLineIndex < 0 || activeLineIndex >= lyrics.lines.length) return 0;
-    const currentLine = lyrics.lines[activeLineIndex];
-    const nextLine = lyrics.lines[activeLineIndex + 1];
-    const lineDuration = nextLine ? Math.max(1, nextLine.time - currentLine.time) : 4.5;
-    const elapsed = Math.max(0, currentTime - currentLine.time);
-    return Math.min(100, Math.max(0, (elapsed / lineDuration) * 100));
-  }, [lyrics, activeLineIndex, currentTime]);
+    scrollTimeoutRef.current = setTimeout(() => setUserIsScrolling(false), 2800);
+  }, []);
 
   if (!currentTrack) {
     return (
@@ -125,8 +176,6 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
 
   return (
     <div className={`flex flex-col h-full w-full relative overflow-hidden select-none transition-colors duration-500 ${isLight ? 'text-black' : 'text-white'}`}>
-      
-      {/* Top Header */}
       <div className={`p-4 border-b flex items-center justify-between z-10 backdrop-blur-2xl ${isLight ? 'bg-white/40 border-black/5' : 'bg-black/30 border-white/5'}`}>
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="p-1.5 rounded-lg bg-fuchsia-500/20 text-fuchsia-400 shadow-inner">
@@ -142,26 +191,19 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
             </span>
           </div>
         </div>
-
         {onClose && (
           <button
             onClick={onClose}
-            className={`p-1.5 rounded-full text-xs font-semibold px-3 transition-all active:scale-95 ${
-              isLight 
-                ? 'bg-black/5 hover:bg-black/10 text-black/70' 
-                : 'bg-white/10 hover:bg-white/20 text-white/80'
-            }`}
-          >
-            ✕
-          </button>
+            className={`p-1.5 rounded-full text-xs font-semibold px-3 transition-all active:scale-95 ${isLight ? 'bg-black/5 hover:bg-black/10 text-black/70' : 'bg-white/10 hover:bg-white/20 text-white/80'}`}
+          >✕</button>
         )}
       </div>
 
-      {/* Lyrics Content Body with Apple Music Depth & Blur */}
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 md:px-8 py-14 space-y-7 scroll-smooth scrollbar-none"
+        className="flex-1 overflow-y-auto px-4 md:px-8 py-14 space-y-5 scrollbar-none"
+        style={{ scrollBehavior: 'smooth' }}
       >
         {loading ? (
           <div className="flex flex-col items-center justify-center py-24 gap-3 opacity-60">
@@ -176,92 +218,60 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
           </div>
         ) : (
           <>
+            <div className="h-24" />
             {lyrics.lines.map((line: LyricLine, index: number) => {
               const isActive = index === activeLineIndex;
               const isPast = index < activeLineIndex;
-              const words = line.text.split(/(\s+)/); // preserve spaces
-
-              // For active line, calculate real-time word-by-word progression
-              const nextLine = lyrics.lines[index + 1];
-              const lineDuration = nextLine ? Math.max(1.2, nextLine.time - line.time) : 4.0;
-              const elapsed = Math.max(0, currentTime - line.time);
-              const progressFraction = Math.min(1, Math.max(0, elapsed / lineDuration));
-
-              const nonSpaceWordCount = words.filter(w => w.trim().length > 0).length || 1;
-              const currentActiveWordTarget = progressFraction * nonSpaceWordCount;
-
-              let wordIndexCounter = 0;
+              const nextLineTime = lyrics.lines[index + 1]?.time;
 
               return (
-                <button
-                  key={`${line.time}-${index}`}
-                  ref={(el) => { lineRefs.current[index] = el; }}
-                  onClick={() => onSeek(line.time)}
-                  className={`w-full text-left transition-all duration-500 ease-out group relative py-2.5 rounded-2xl px-2 focus:outline-none select-none ${
-                    isActive
-                      ? 'scale-[1.04] translate-x-1.5 opacity-100 z-10'
-                      : isPast
-                      ? 'opacity-35 hover:opacity-80 hover:blur-0'
-                      : 'opacity-25 hover:opacity-75 hover:blur-0'
-                  }`}
-                  style={{
-                    filter: isActive ? 'blur(0px)' : 'blur(0.8px)'
-                  }}
-                >
-                  <p className="text-xl md:text-3xl leading-relaxed tracking-tight font-black transition-all duration-300 m-0">
-                    {words.map((word, wIdx) => {
-                      const isSpace = word.trim().length === 0;
-                      if (isSpace) {
-                        return <span key={wIdx}>{word}</span>;
-                      }
-
-                      const currentWIdx = wordIndexCounter++;
-                      const isWordSung = isActive && currentWIdx < currentActiveWordTarget;
-                      const isWordActive = isActive && Math.floor(currentActiveWordTarget) === currentWIdx;
-
-                      return (
-                        <span
-                          key={wIdx}
-                          className={`inline-block transition-all duration-500 ease-out ${
-                            isActive
-                              ? isWordActive
-                                ? isLight
-                                  ? 'text-black font-black drop-shadow-[0_0_12px_rgba(0,0,0,0.6)]'
-                                  : 'text-white font-black drop-shadow-[0_0_25px_rgba(255,255,255,1)] brightness-125'
-                                : isWordSung
-                                ? isLight
-                                  ? 'text-black/90 font-black'
-                                  : 'text-white/95 font-black drop-shadow-[0_0_8px_rgba(255,255,255,0.4)]'
-                                : isLight
-                                ? 'text-black/35 font-bold'
-                                : 'text-white/35 font-bold'
-                              : isLight
-                              ? 'text-black/40'
-                              : 'text-white/40'
-                          }`}
-                        >
-                          {word}
-                        </span>
-                      );
-                    })}
-                  </p>
-                </button>
+                <div key={`${line.time}-${index}`} ref={(el) => { lineRefs.current[index] = el; }}>
+                  {isActive ? (
+                    <ActiveLyricLine
+                      line={line}
+                      nextLineTime={nextLineTime}
+                      currentTime={currentTime}
+                      isLight={isLight}
+                      onSeek={onSeek}
+                    />
+                  ) : (
+                    <motion.button
+                      onClick={() => onSeek(line.time)}
+                      animate={{
+                        opacity: isPast ? 0.38 : 0.24,
+                        filter: isPast ? 'blur(0.5px)' : 'blur(1.5px)',
+                        scale: 1,
+                      }}
+                      transition={SPRING_CFG}
+                      className="w-full text-left relative py-2 px-3 rounded-2xl focus:outline-none select-none group"
+                      style={{ transformOrigin: 'left center' }}
+                      whileHover={{ opacity: 0.72, filter: 'blur(0px)', transition: { duration: 0.15 } }}
+                    >
+                      <p
+                        className="text-xl md:text-3xl leading-relaxed tracking-tight font-black m-0"
+                        style={{
+                          color: isLight
+                            ? isPast ? 'rgba(0,0,0,0.85)' : 'rgba(0,0,0,0.5)'
+                            : isPast ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)',
+                        }}
+                      >
+                        {line.text}
+                      </p>
+                    </motion.button>
+                  )}
+                </div>
               );
             })}
-
-            {/* Bottom spacing for smooth centering */}
             <div className="h-40" />
           </>
         )}
       </div>
 
-      {/* Floating Karaoke Footer */}
       {lyrics && lyrics.synced && (
-        <div className={`p-3 px-4 text-center border-t text-[10px] tracking-widest font-bold uppercase flex items-center justify-center gap-2 backdrop-blur-2xl ${
-          isLight ? 'bg-white/40 border-black/5 text-black/50' : 'bg-black/30 border-white/5 text-white/50'
-        }`}>
-          <Sparkles size={12} className="text-fuchsia-400 animate-pulse" />
-          <span>Tap any lyric line to jump in sync</span>
+        <div className={`p-3 px-4 text-center border-t text-[10px] tracking-widest font-bold uppercase flex items-center justify-center gap-2 backdrop-blur-2xl ${isLight ? 'bg-white/30 border-black/5 text-black/30' : 'bg-black/30 border-white/5 text-white/25'}`}>
+          <span className={`h-1 w-1 rounded-full ${isPlaying ? 'bg-fuchsia-400 animate-pulse' : 'bg-white/30'}`} />
+          <span>Real-time synced</span>
+          <span className={`h-1 w-1 rounded-full ${isPlaying ? 'bg-fuchsia-400 animate-pulse' : 'bg-white/30'}`} />
         </div>
       )}
     </div>
