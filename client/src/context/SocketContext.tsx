@@ -36,6 +36,13 @@ interface MusicState {
   queue?: any[];
 }
 
+export interface ParticipantMediaState {
+  cameraEnabled: boolean;
+  microphoneEnabled: boolean;
+  speaking: boolean;
+  screenSharing?: boolean;
+}
+
 interface SocketContextType {
   socket: Socket | null;
   isConnected: boolean;
@@ -50,6 +57,9 @@ interface SocketContextType {
   ) => void;
   chatMessages: ChatMessage[];
   participants: Participant[];
+  participantMediaStates: Record<string, ParticipantMediaState>;
+  updateMyMediaState: (state: { cameraEnabled?: boolean; microphoneEnabled?: boolean; screenSharing?: boolean }) => void;
+  sendSpeakingState: (speaking: boolean) => void;
   musicState: MusicState;
   clockOffset: number;
   getServerTime: () => number;
@@ -82,6 +92,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [participantMediaStates, setParticipantMediaStates] = useState<Record<string, ParticipantMediaState>>({});
+  const [clockOffset, setClockOffset] = useState<number>(0);
   const [roomName, setRoomName] = useState<string>('');
   const [hostId, setHostId] = useState<string | null>(null);
   const [djPasscode, setDjPasscode] = useState<string | null>(null);
@@ -91,7 +103,6 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [activeReaction, setActiveReaction] = useState<SocketContextType['activeReaction']>(null);
-  const [clockOffset, setClockOffset] = useState<number>(0);
   const [musicState, setMusicState] = useState<MusicState>({
     currentTrackId: null,
     isPlaying: false,
@@ -182,6 +193,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       djPasscode?: string;
       isDjAuthorized?: boolean;
       participants: any[];
+      participantMediaStates?: Record<string, ParticipantMediaState>;
       musicState: any;
       chatHistory: ChatMessage[];
     }) => {
@@ -204,9 +216,54 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           joinedAt: p.joinedAt,
         })));
       }
+      if (payload.participantMediaStates) {
+        setParticipantMediaStates(payload.participantMediaStates);
+      }
       if (payload.musicState) {
         setMusicState(payload.musicState);
       }
+    });
+
+    // Real-time participant media state updates (Camera ON/OFF, Mic ON/OFF)
+    sock.on('participant:media-state-updated', (payload: {
+      userId: string;
+      cameraEnabled: boolean;
+      microphoneEnabled: boolean;
+      speaking: boolean;
+      screenSharing?: boolean;
+    }) => {
+      setParticipantMediaStates(prev => ({
+        ...prev,
+        [payload.userId]: {
+          cameraEnabled: payload.cameraEnabled,
+          microphoneEnabled: payload.microphoneEnabled,
+          speaking: payload.speaking,
+          screenSharing: payload.screenSharing
+        }
+      }));
+    });
+
+    // Real-time speaking detection state updates
+    sock.on('participant:speaking-updated', (payload: { userId: string; speaking: boolean }) => {
+      setParticipantMediaStates(prev => {
+        const current = prev[payload.userId] || { cameraEnabled: false, microphoneEnabled: false, speaking: false };
+        return {
+          ...prev,
+          [payload.userId]: {
+            ...current,
+            speaking: payload.speaking
+          }
+        };
+      });
+    });
+
+    // Remove media state when participant leaves
+    sock.on('participant:media-state-removed', (payload: { userId: string }) => {
+      setParticipantMediaStates(prev => {
+        const next = { ...prev };
+        delete next[payload.userId];
+        return next;
+      });
     });
 
     // Host promotion & updates
@@ -411,6 +468,30 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
   }, []);
 
+  const updateMyMediaState = useCallback((mediaUpdate: {
+    cameraEnabled?: boolean;
+    microphoneEnabled?: boolean;
+    screenSharing?: boolean;
+  }) => {
+    const sock = socketRef.current;
+    if (sock && roomIdRef.current) {
+      sock.emit('participant:media-state', {
+        roomId: roomIdRef.current,
+        ...mediaUpdate
+      });
+    }
+  }, []);
+
+  const sendSpeakingState = useCallback((speaking: boolean) => {
+    const sock = socketRef.current;
+    if (sock && roomIdRef.current) {
+      sock.emit('participant:speaking', {
+        roomId: roomIdRef.current,
+        speaking
+      });
+    }
+  }, []);
+
   const unlockDj = useCallback((passcode: string) => {
     const sock = socketRef.current;
     if (sock && roomIdRef.current) {
@@ -443,6 +524,9 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         sendMusicAction,
         chatMessages,
         participants,
+        participantMediaStates,
+        updateMyMediaState,
+        sendSpeakingState,
         musicState,
         clockOffset,
         getServerTime,

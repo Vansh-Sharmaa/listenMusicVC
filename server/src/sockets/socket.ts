@@ -66,15 +66,24 @@ export function setupSockets(io: Server) {
         const djPasscode = isHost ? db.generateNewDjPasscode(roomId, userId) : undefined;
         const isDjAuthorized = isHost;
 
+        // Initialize participant media state (Camera OFF, Mic OFF by default)
+        const initialMediaState = db.updateParticipantMediaState(roomId, userId, {
+          cameraEnabled: false,
+          microphoneEnabled: false,
+          speaking: false,
+          screenSharing: false
+        });
+
         console.log(`[Room Join] User "${username}" (${userId}) joined room "${roomId}". isHost: ${isHost}, hostId: "${room?.hostId}", djPasscode: "${djPasscode}"`);
 
-        // Send room state confirmation
+        // Send room state confirmation (includes all participant media states)
         socket.emit('room:joined', {
           roomName: room?.name,
           hostId: room?.hostId,
           djPasscode,
           isDjAuthorized,
           participants: room?.participants || [],
+          participantMediaStates: db.getParticipantMediaStates(roomId),
           musicState,
           chatHistory,
           existingSockets
@@ -87,6 +96,12 @@ export function setupSockets(io: Server) {
           socketId: socket.id,
           userId,
           username
+        });
+
+        // Broadcast initial media state to all other participants
+        socket.to(roomId).emit('participant:media-state-updated', {
+          userId,
+          ...initialMediaState
         });
 
         // Broadcast user joined for chat notification
@@ -233,6 +248,54 @@ export function setupSockets(io: Server) {
       }
     });
 
+    // Real-time participant media state change (Camera ON/OFF, Mic ON/OFF, Screen Sharing)
+    socket.on('participant:media-state', (payload: {
+      roomId: string;
+      cameraEnabled?: boolean;
+      microphoneEnabled?: boolean;
+      screenSharing?: boolean;
+    }) => {
+      const { roomId, cameraEnabled, microphoneEnabled, screenSharing } = payload;
+      const targetUserId = currentUserId || (socket as any)?.data?.userId;
+      if (!roomId || !targetUserId) return;
+
+      const updateData: any = {};
+      if (cameraEnabled !== undefined) updateData.cameraEnabled = cameraEnabled;
+      if (microphoneEnabled !== undefined) {
+        updateData.microphoneEnabled = microphoneEnabled;
+        if (!microphoneEnabled) {
+          updateData.speaking = false; // Microphone OFF overrides speaking
+        }
+      }
+      if (screenSharing !== undefined) updateData.screenSharing = screenSharing;
+
+      const updated = db.updateParticipantMediaState(roomId, targetUserId, updateData);
+
+      io.to(roomId).emit('participant:media-state-updated', {
+        userId: targetUserId,
+        ...updated
+      });
+    });
+
+    // Real-time speaking detection broadcast (Discord-like speech indicator)
+    socket.on('participant:speaking', (payload: { roomId: string; speaking: boolean }) => {
+      const { roomId, speaking } = payload;
+      const targetUserId = currentUserId || (socket as any)?.data?.userId;
+      if (!roomId || !targetUserId) return;
+
+      const states = db.getParticipantMediaStates(roomId);
+      const userMedia = states[targetUserId];
+      const isMicOn = userMedia ? userMedia.microphoneEnabled : false;
+      const actualSpeaking = isMicOn && Boolean(speaking);
+
+      db.updateParticipantMediaState(roomId, targetUserId, { speaking: actualSpeaking });
+
+      io.to(roomId).emit('participant:speaking-updated', {
+        userId: targetUserId,
+        speaking: actualSpeaking
+      });
+    });
+
     // Handle synchronized music actions
     socket.on('music:action', async (payload: {
       roomId: string;
@@ -362,11 +425,16 @@ export function setupSockets(io: Server) {
       if (currentRoomId && currentUserId) {
         try {
           await db.leaveRoom(currentRoomId, currentUserId);
+          db.removeParticipantMediaState(currentRoomId, currentUserId);
           
           socket.to(currentRoomId).emit('room:user-left', {
             userId: currentUserId,
             username: currentUsername,
             socketId: socket.id
+          });
+
+          socket.to(currentRoomId).emit('participant:media-state-removed', {
+            userId: currentUserId
           });
 
           // If the disconnected user was the host, promote the next active user to Host

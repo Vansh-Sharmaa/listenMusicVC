@@ -59,8 +59,12 @@ interface PeerStream {
   stream: MediaStream;
 }
 
-// Safe remote video & audio player with guaranteed playback
-const RemoteVideoPlayer: React.FC<{ stream: MediaStream; username?: string }> = ({ stream, username = 'Partner' }) => {
+// Safe remote video & audio player with guaranteed playback and Camera Off placeholder
+const RemoteVideoPlayer: React.FC<{
+  stream: MediaStream;
+  username?: string;
+  cameraEnabled?: boolean;
+}> = ({ stream, username = 'Partner', cameraEnabled = false }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -99,25 +103,30 @@ const RemoteVideoPlayer: React.FC<{ stream: MediaStream; username?: string }> = 
 
   return (
     <div className="relative w-full h-full flex items-center justify-center bg-[#18181b] overflow-hidden">
-      {/* Background Avatar placeholder when video frames are loading */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 select-none z-0">
-        <div className="h-16 w-16 md:h-20 md:w-20 rounded-full bg-gradient-to-br from-fuchsia-600 to-indigo-600 flex items-center justify-center text-xl md:text-2xl font-bold text-white shadow-xl border border-white/20 animate-pulse">
+      {/* Avatar placeholder when camera is OFF */}
+      <div className={`absolute inset-0 flex flex-col items-center justify-center gap-2.5 select-none z-0 transition-opacity duration-300 ${cameraEnabled ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+        <div className="h-16 w-16 md:h-20 md:w-20 rounded-full bg-gradient-to-br from-fuchsia-600 to-indigo-600 flex items-center justify-center text-xl md:text-2xl font-bold text-white shadow-xl border border-white/20">
           {username.charAt(0).toUpperCase()}
         </div>
-        <span className="text-[11px] md:text-xs text-white/50">{username} (Connecting...)</span>
+        <div className="flex flex-col items-center gap-1">
+          <span className="text-[11px] md:text-xs text-white/70 font-semibold">{username}</span>
+          <span className="text-[10px] text-white/40 flex items-center gap-1 bg-black/40 px-2 py-0.5 rounded-full border border-white/5">
+            <VideoOff size={10} /> Camera Off
+          </span>
+        </div>
       </div>
 
-      {/* Video Element - ALWAYS active in DOM so browser decodes and displays frames */}
+      {/* Video Element - Shown when camera is ON */}
       <video
         ref={videoRef}
         autoPlay
         muted
         playsInline
-        className={`absolute inset-0 w-full h-full object-cover z-10 transition-opacity duration-300 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-0 w-full h-full object-cover z-10 transition-opacity duration-300 ${cameraEnabled ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
         onPlaying={() => setIsPlaying(true)}
       />
 
-      {/* Direct Remote Audio Stream Element (Plays screenshare audio and voice cleanly) */}
+      {/* Direct Remote Audio Stream Element */}
       <audio ref={audioRef} autoPlay playsInline className="hidden" />
     </div>
   );
@@ -160,7 +169,24 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   onLeave
 }) => {
   // Context hooks
-  const { socket, joinRoom, sendReaction, participants, isConnected, musicState, sendMusicAction, getServerTime, isHost, hostId, isDjAuthorized, permissionError, clearPermissionError } = useSocket();
+  const {
+    socket,
+    joinRoom,
+    sendReaction,
+    participants,
+    participantMediaStates,
+    updateMyMediaState,
+    sendSpeakingState,
+    isConnected,
+    musicState,
+    sendMusicAction,
+    getServerTime,
+    isHost,
+    hostId,
+    isDjAuthorized,
+    permissionError,
+    clearPermissionError
+  } = useSocket();
   const {
     initAudio,
     processLocalMicTrack,
@@ -180,10 +206,21 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const isLight = theme === 'light';
 
-  // Toolbar controls
-  const [micOn, setMicOn] = useState(true);
-  const [camOn, setCamOn] = useState(true);
+  // Toolbar controls - Camera and Microphone must be OFF by default
+  const [micOn, setMicOn] = useState(false);
+  const [camOn, setCamOn] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+
+  // Real-time speech detection using Web Audio API
+  const [isLocalSpeaking, setIsLocalSpeaking] = useState(false);
+  const speechIntervalRef = useRef<any>(null);
+  const isSpeakingRef = useRef<boolean>(false);
+  const lastSpeechTimeRef = useRef<number>(0);
+
+  // Mock speaking state (testing utility)
+  const [mockSpeakingUser, setMockSpeakingUser] = useState<string | null>(null);
+  const mockOscillatorRef = useRef<OscillatorNode | null>(null);
+  const mockOscillatorGainRef = useRef<GainNode | null>(null);
 
   // Sidebar toggles
   const [activeSidebar, setActiveSidebar] = useState<'chat' | 'music' | 'mixer' | 'lyrics' | null>('music');
@@ -202,10 +239,78 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     }
   }, [musicState.currentTrack?.thumbnail]);
 
-  // Mock speaking state (solo testing utility)
-  const [mockSpeakingUser, setMockSpeakingUser] = useState<string | null>(null);
-  const mockOscillatorRef = useRef<OscillatorNode | null>(null);
-  const mockOscillatorGainRef = useRef<GainNode | null>(null);
+  // Real-time Speech Detection Loop with Hysteresis Smoothing
+  useEffect(() => {
+    if (!micOn || !localStream) {
+      if (isSpeakingRef.current) {
+        isSpeakingRef.current = false;
+        setIsLocalSpeaking(false);
+        sendSpeakingState(false);
+      }
+      if (speechIntervalRef.current) {
+        clearInterval(speechIntervalRef.current);
+        speechIntervalRef.current = null;
+      }
+      return;
+    }
+
+    const audioTrack = localStream.getAudioTracks()[0];
+    if (!audioTrack) return;
+
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = audioContext || new AudioCtx();
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+
+      const micStream = new MediaStream([audioTrack]);
+      const source = ctx.createMediaStreamSource(micStream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.3;
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const SPEECH_ENTER_THRESHOLD = 0.025; // Root-mean-square volume threshold to start speaking
+      const SPEECH_EXIT_THRESHOLD = 0.015;  // Volume threshold to stop speaking
+      const HANGOVER_MS = 350;             // Delay before clearing speaking state to avoid rapid flickering
+
+      speechIntervalRef.current = setInterval(() => {
+        analyser.getByteTimeDomainData(dataArray);
+        let sumSquares = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          const norm = (dataArray[i] - 128) / 128;
+          sumSquares += norm * norm;
+        }
+        const rms = Math.sqrt(sumSquares / dataArray.length);
+        const now = Date.now();
+
+        if (rms > SPEECH_ENTER_THRESHOLD) {
+          lastSpeechTimeRef.current = now;
+          if (!isSpeakingRef.current) {
+            isSpeakingRef.current = true;
+            setIsLocalSpeaking(true);
+            sendSpeakingState(true);
+          }
+        } else if (isSpeakingRef.current && (now - lastSpeechTimeRef.current > HANGOVER_MS) && rms < SPEECH_EXIT_THRESHOLD) {
+          isSpeakingRef.current = false;
+          setIsLocalSpeaking(false);
+          sendSpeakingState(false);
+        }
+      }, 50);
+
+      return () => {
+        if (speechIntervalRef.current) {
+          clearInterval(speechIntervalRef.current);
+          speechIntervalRef.current = null;
+        }
+        try { source.disconnect(); } catch (_) {}
+      };
+    } catch (err) {
+      console.warn('[Speech Detector] Initialization warning:', err);
+    }
+  }, [micOn, localStream, audioContext, sendSpeakingState]);
 
   // Refs - these are stable across renders
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -943,6 +1048,10 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       stream = createFallbackStream();
     }
 
+    // Camera and Microphone must be OFF by default
+    stream.getVideoTracks().forEach(t => { t.enabled = false; });
+    stream.getAudioTracks().forEach(t => { t.enabled = false; });
+
     localStreamRef.current = stream;
     setLocalStream(stream);
 
@@ -952,8 +1061,11 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       processLocalMicTrack(micTrack).catch(e => console.warn('[Media] Mic process warning:', e));
     }
 
-    // BUG FIX #2: mark media as ready
+    // Mark media as ready
     localMediaReadyRef.current = true;
+
+    // Broadcast default OFF media state to room
+    updateMyMediaState({ cameraEnabled: false, microphoneEnabled: false, screenSharing: false });
 
     // Add local tracks (and music track) to any already-existing peer connections
     peerConnectionsRef.current.forEach((pc, _sid) => {
@@ -1217,11 +1329,41 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   }, [socket, createPeerConnection, processQueuedCandidates, unregisterRemoteVoiceTrack]);
 
   // ─────────────────────────────────────────────────────────────
-  // Media controls
+  // Media controls (Real-time WebRTC track enable/disable & signaling broadcast)
   // ─────────────────────────────────────────────────────────────
 
-  const toggleMic = () => {
+  const toggleMic = async () => {
     const newMicState = !micOn;
+
+    // If enabling mic and we don't have a real audio track yet or permission was needed
+    if (newMicState && localStreamRef.current) {
+      const audioTracks = localStreamRef.current.getAudioTracks();
+      if (audioTracks.length === 0 || audioTracks[0].label.includes('Virtual') || audioTracks[0].label.includes('Silent')) {
+        try {
+          const realStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false }
+          });
+          const realTrack = realStream.getAudioTracks()[0];
+          if (realTrack) {
+            localStreamRef.current.removeTrack(audioTracks[0]);
+            localStreamRef.current.addTrack(realTrack);
+            peerConnectionsRef.current.forEach(pc => {
+              pc.getSenders().forEach(s => {
+                if (s.track?.kind === 'audio' && !Array.from(screenShareSendersRef.current.values()).some(list => list.includes(s))) {
+                  s.replaceTrack(realTrack).catch(() => {});
+                }
+              });
+            });
+            processLocalMicTrack(realTrack).catch(() => {});
+          }
+        } catch (e) {
+          console.warn('[Media] Failed to get microphone device:', e);
+          alert('Microphone Access Notice:\nPlease allow microphone access in your browser settings to speak.');
+          return;
+        }
+      }
+    }
+
     setMicOn(newMicState);
 
     // 1. Mute/unmute all local audio tracks
@@ -1244,11 +1386,53 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       });
     });
 
-    console.log(`[Media] Microphone toggled: ${newMicState ? 'UNMUTED 🎙️' : 'MUTED 🔇'}`);
+    // 3. Broadcast updated media state to all peers
+    updateMyMediaState({ microphoneEnabled: newMicState });
+
+    // 4. If turning mic OFF, immediately cancel speaking state everywhere
+    if (!newMicState) {
+      isSpeakingRef.current = false;
+      setIsLocalSpeaking(false);
+      sendSpeakingState(false);
+    }
+
+    console.log(`[Media] Microphone toggled: ${newMicState ? 'UNMUTED 🎙️ (GREEN)' : 'MUTED 🔇 (RED)'}`);
   };
 
-  const toggleCam = () => {
+  const toggleCam = async () => {
     const newCamState = !camOn;
+
+    // If enabling camera and we need to acquire a real camera track
+    if (newCamState && localStreamRef.current) {
+      const videoTracks = localStreamRef.current.getVideoTracks();
+      if (videoTracks.length === 0 || videoTracks[0].label.includes('Virtual') || videoTracks[0].label.includes('canvas')) {
+        try {
+          const realStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+          });
+          const realTrack = realStream.getVideoTracks()[0];
+          if (realTrack) {
+            localStreamRef.current.removeTrack(videoTracks[0]);
+            localStreamRef.current.addTrack(realTrack);
+            peerConnectionsRef.current.forEach(pc => {
+              pc.getSenders().forEach(s => {
+                if (s.track?.kind === 'video' && !Array.from(screenShareSendersRef.current.values()).some(list => list.includes(s))) {
+                  s.replaceTrack(realTrack).catch(() => {});
+                }
+              });
+            });
+            if (localVideoRef.current) {
+              localVideoRef.current.srcObject = localStreamRef.current;
+            }
+          }
+        } catch (e) {
+          console.warn('[Media] Failed to get camera device:', e);
+          alert('Camera Access Notice:\nPlease allow camera access in your browser settings to share your video.');
+          return;
+        }
+      }
+    }
+
     setCamOn(newCamState);
 
     if (localStreamRef.current) {
@@ -1268,6 +1452,9 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       });
     });
 
+    // Broadcast updated camera state to all peers
+    updateMyMediaState({ cameraEnabled: newCamState });
+
     console.log(`[Media] Camera toggled: ${newCamState ? 'ON 📷' : 'OFF 🚫'}`);
   };
 
@@ -1284,6 +1471,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       });
       setScreenStream(null);
       setIsScreenSharing(false);
+      updateMyMediaState({ screenSharing: false });
       await renegotiateAllPeers();
       return;
     }
@@ -1302,6 +1490,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       });
       setScreenStream(stream);
       setIsScreenSharing(true);
+      updateMyMediaState({ screenSharing: true });
 
       // Add screen share tracks to all active peer connections so the partner receives them
       peerConnectionsRef.current.forEach((pc, sid) => {
@@ -1598,29 +1787,52 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
           {/* Video Grid (Optimized for iPhone / Mobile vertical stack & Desktop horizontal grid) */}
           <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4 w-full max-w-5xl mx-auto items-center justify-center p-1 md:p-2 overflow-y-auto min-h-0">
 
-            {/* Local Video */}
-            <div className={`backdrop-blur-3xl w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-[32px] overflow-hidden border relative shadow-lg flex items-center justify-center transition-all duration-500 ${isLight ? 'bg-white/30 border-white/40' : 'bg-white/5 border-white/5'}`}>
-              <video
-                ref={localVideoRef}
-                autoPlay
-                playsInline
-                muted
-                className={`w-full h-full object-cover transform scale-x-[-1] ${!camOn ? 'hidden' : ''}`}
-              />
-              {!camOn && (
-                <div className="text-center space-y-2">
-                  <div className="h-12 w-12 md:h-16 md:w-16 bg-white/5 rounded-full flex items-center justify-center mx-auto border border-white/10 text-white/30">
-                    <VideoOff size={20} />
-                  </div>
-                  <span className="text-[11px] text-white/40">{username} (Camera Off)</span>
+            {/* Local Video Tile */}
+            {(() => {
+              const isLocalSpeakingActive = isLocalSpeaking && micOn;
+              return (
+                <div
+                  className={`backdrop-blur-3xl w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-[32px] overflow-hidden border relative shadow-lg flex items-center justify-center transition-all duration-300 ${
+                    isLocalSpeakingActive
+                      ? 'ring-2 ring-emerald-400 shadow-[0_0_24px_rgba(52,211,153,0.45)] border-emerald-400'
+                      : isLight ? 'bg-white/30 border-white/40' : 'bg-white/5 border-white/5'
+                  }`}
+                >
+                  <video
+                    ref={localVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className={`w-full h-full object-cover transform scale-x-[-1] transition-opacity duration-300 ${camOn ? 'opacity-100' : 'opacity-0 hidden'}`}
+                  />
+                  {!camOn && (
+                    <div className="text-center space-y-2 select-none">
+                      <div className="h-14 w-14 md:h-18 md:w-18 bg-gradient-to-br from-fuchsia-600 to-indigo-600 rounded-full flex items-center justify-center mx-auto border border-white/20 text-white font-bold text-xl shadow-lg">
+                        {username.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="text-[11px] md:text-xs text-white/70 font-semibold">{username} (You)</span>
+                        <span className="text-[10px] text-white/40 flex items-center gap-1 bg-black/40 px-2.5 py-0.5 rounded-full border border-white/5">
+                          <VideoOff size={10} /> Camera Off
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  <span className={`absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 z-20 ${isLight ? 'bg-white/80 text-black border-black/10' : 'bg-black/60 text-white border-white/10'}`}>
+                    <span className={`h-2 w-2 rounded-full ${micOn ? (isLocalSpeakingActive ? 'bg-emerald-400 animate-ping' : 'bg-emerald-500') : 'bg-red-500'}`} />
+                    <span>{username} (You)</span>
+                    <span className={`text-[9px] px-1.5 py-0.2 rounded-md font-bold uppercase ${
+                      micOn
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                        : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                    }`}>
+                      {micOn ? (isLocalSpeakingActive ? '🔊 Speaking' : 'Mic ON') : 'Mic OFF'}
+                    </span>
+                    {isHost && <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.2 rounded-full font-bold">👑 Host</span>}
+                  </span>
                 </div>
-              )}
-              <span className={`absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 ${isLight ? 'bg-white/80 text-black border-black/10' : 'bg-black/60 text-white border-white/10'}`}>
-                <span className={`h-2 w-2 rounded-full ${micOn ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                <span>{username} (You)</span>
-                {isHost && <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.2 rounded-full font-bold">👑 Host</span>}
-              </span>
-            </div>
+              );
+            })()}
 
             {/* Screen Share Tile */}
             {isScreenSharing && (
@@ -1640,13 +1852,30 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             {/* Remote Peer Videos & Remote Screen Shares */}
             {remotePeerList.flatMap(peer => {
               const videoTracks = peer.stream.getVideoTracks();
+              const peerMedia = participantMediaStates[peer.userId] || { cameraEnabled: false, microphoneEnabled: false, speaking: false };
+              const isPeerSpeaking = peerMedia.speaking && peerMedia.microphoneEnabled;
+              const glowClass = isPeerSpeaking
+                ? 'ring-2 ring-emerald-400 shadow-[0_0_24px_rgba(52,211,153,0.45)] border-emerald-400'
+                : (isLight ? 'bg-white/30 border-white/40' : 'bg-white/5 border-white/5');
+
               if (videoTracks.length <= 1) {
                 return [
-                  <div key={peer.socketId} className={`backdrop-blur-3xl w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-[32px] overflow-hidden border relative shadow-lg flex items-center justify-center transition-all duration-500 ${isLight ? 'bg-white/30 border-white/40' : 'bg-white/5 border-white/5'}`}>
-                    <RemoteVideoPlayer stream={peer.stream} username={peer.username} />
-                    <span className={`absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 z-10 ${isLight ? 'bg-white/80 text-black border-black/10' : 'bg-black/60 text-white border-white/10'}`}>
-                      <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <div key={peer.socketId} className={`backdrop-blur-3xl w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-[32px] overflow-hidden border relative shadow-lg flex items-center justify-center transition-all duration-300 ${glowClass}`}>
+                    <RemoteVideoPlayer
+                      stream={peer.stream}
+                      username={peer.username}
+                      cameraEnabled={peerMedia.cameraEnabled}
+                    />
+                    <span className={`absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 z-20 ${isLight ? 'bg-white/80 text-black border-black/10' : 'bg-black/60 text-white border-white/10'}`}>
+                      <span className={`h-2 w-2 rounded-full ${peerMedia.microphoneEnabled ? (isPeerSpeaking ? 'bg-emerald-400 animate-ping' : 'bg-emerald-500') : 'bg-red-500'}`} />
                       <span>{peer.username}</span>
+                      <span className={`text-[9px] px-1.5 py-0.2 rounded-md font-bold uppercase ${
+                        peerMedia.microphoneEnabled
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                      }`}>
+                        {peerMedia.microphoneEnabled ? (isPeerSpeaking ? '🔊 Speaking' : 'Mic ON') : 'Mic OFF'}
+                      </span>
                       {hostId === peer.userId && <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.2 rounded-full font-bold">👑 Host</span>}
                     </span>
                   </div>
@@ -1656,11 +1885,24 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                 const singleStream = new MediaStream([track, ...peer.stream.getAudioTracks()]);
                 const isScreen = idx > 0;
                 return (
-                  <div key={`${peer.socketId}_${track.id}`} className={`backdrop-blur-3xl w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-[32px] overflow-hidden relative shadow-lg flex items-center justify-center transition-all duration-500 ${isScreen ? (isLight ? 'bg-emerald-50/50 border border-emerald-500/30' : 'bg-white/5 border border-emerald-500/20') : (isLight ? 'bg-white/30 border border-white/40' : 'bg-white/5 border border-white/5')}`}>
-                    <RemoteVideoPlayer stream={singleStream} username={peer.username} />
-                    <span className={`absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 z-10 ${isScreen ? (isLight ? 'bg-emerald-100/90 text-emerald-800 border-emerald-500/30' : 'bg-emerald-950/80 text-emerald-300 border-emerald-500/30') : (isLight ? 'bg-white/80 text-black border-black/10' : 'bg-black/60 text-white border-white/10')}`}>
-                      {isScreen ? <Tv size={12} /> : <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />}
+                  <div key={`${peer.socketId}_${track.id}`} className={`backdrop-blur-3xl w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-[32px] overflow-hidden relative shadow-lg flex items-center justify-center transition-all duration-300 ${isScreen ? (isLight ? 'bg-emerald-50/50 border border-emerald-500/30' : 'bg-white/5 border border-emerald-500/20') : glowClass}`}>
+                    <RemoteVideoPlayer
+                      stream={singleStream}
+                      username={peer.username}
+                      cameraEnabled={isScreen ? true : peerMedia.cameraEnabled}
+                    />
+                    <span className={`absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 z-20 ${isScreen ? (isLight ? 'bg-emerald-100/90 text-emerald-800 border-emerald-500/30' : 'bg-emerald-950/80 text-emerald-300 border-emerald-500/30') : (isLight ? 'bg-white/80 text-black border-black/10' : 'bg-black/60 text-white border-white/10')}`}>
+                      {isScreen ? <Tv size={12} /> : <span className={`h-2 w-2 rounded-full ${peerMedia.microphoneEnabled ? (isPeerSpeaking ? 'bg-emerald-400 animate-ping' : 'bg-emerald-500') : 'bg-red-500'}`} />}
                       {peer.username} {isScreen ? "'s Screen" : ''}
+                      {!isScreen && (
+                        <span className={`text-[9px] px-1.5 py-0.2 rounded-md font-bold uppercase ${
+                          peerMedia.microphoneEnabled
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                        }`}>
+                          {peerMedia.microphoneEnabled ? (isPeerSpeaking ? '🔊 Speaking' : 'Mic ON') : 'Mic OFF'}
+                        </span>
+                      )}
                     </span>
                   </div>
                 );
@@ -1671,11 +1913,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             {remotePeerList.length === 0 && (
               <div className={`backdrop-blur-3xl w-full h-full max-h-[42vh] md:max-h-none aspect-video rounded-[32px] overflow-hidden border relative shadow-lg flex items-center justify-center transition-all duration-500 ${isLight ? 'bg-white/30 border-white/40' : 'bg-white/5 border-white/5'}`}>
                 <div className="text-center space-y-2 md:space-y-3">
-                  <div className={`h-12 w-12 md:h-16 md:w-16 rounded-full flex items-center justify-center mx-auto border transition-all duration-300 ${
-                    mockSpeakingUser === 'Partner'
-                      ? 'bg-emerald-600/30 border-emerald-400 shadow-[0_0_12px_#10b981]'
-                      : 'bg-white/5 border-white/10'
-                  }`}>
+                  <div className="h-12 w-12 md:h-16 md:w-16 rounded-full flex items-center justify-center mx-auto border bg-white/5 border-white/10">
                     <span className="text-base md:text-lg font-bold text-white/70">P</span>
                   </div>
                   <div className="flex flex-col">
@@ -2149,13 +2387,43 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
           {/* Bottom Toolbar (iPhone & Mobile optimized with safe areas) */}
           <div className="h-16 md:h-20 flex justify-center items-center gap-1.5 md:gap-3.5 z-20 flex-shrink-0 select-none pb-2 md:pb-0">
-            <button onClick={toggleMic} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${micOn ? (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/15 hover:bg-white/25 text-white') : (isLight ? 'bg-red-100 text-red-600' : 'bg-white/5 hover:bg-white/10 text-white/40')}`}>
+            {/* Microphone Toggle Button */}
+            <button
+              onClick={toggleMic}
+              aria-label={micOn ? "Turn microphone off" : "Turn microphone on"}
+              title={micOn ? "Turn microphone off (Currently ON)" : "Turn microphone on (Currently OFF)"}
+              className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center gap-1.5 justify-center active:scale-90 font-bold text-xs ${
+                micOn
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-950/40 border border-emerald-400'
+                  : 'bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/40 shadow-md'
+              }`}
+            >
               {micOn ? <Mic size={18} /> : <MicOff size={18} />}
+              <span className="hidden sm:inline text-[11px]">{micOn ? 'Mic ON' : 'Mic OFF'}</span>
             </button>
-            <button onClick={toggleCam} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${camOn ? (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/15 hover:bg-white/25 text-white') : (isLight ? 'bg-red-100 text-red-600' : 'bg-white/5 hover:bg-white/10 text-white/40')}`}>
+
+            {/* Camera Toggle Button */}
+            <button
+              onClick={toggleCam}
+              aria-label={camOn ? "Turn camera off" : "Turn camera on"}
+              title={camOn ? "Turn camera off (Currently ON)" : "Turn camera on (Currently OFF)"}
+              className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center gap-1.5 justify-center active:scale-90 font-bold text-xs ${
+                camOn
+                  ? (isLight ? 'bg-black text-white shadow-lg border border-black' : 'bg-white text-black shadow-lg border border-white')
+                  : (isLight ? 'bg-black/5 hover:bg-black/10 text-black/50 border border-black/10' : 'bg-white/10 hover:bg-white/20 text-white/50 border border-white/10')
+              }`}
+            >
               {camOn ? <Video size={18} /> : <VideoOff size={18} />}
+              <span className="hidden sm:inline text-[11px]">{camOn ? 'Cam ON' : 'Cam OFF'}</span>
             </button>
-            <button onClick={toggleScreenShare} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${isScreenSharing ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`}>
+
+            {/* Screen Share Button */}
+            <button
+              onClick={toggleScreenShare}
+              aria-label={isScreenSharing ? "Stop sharing screen" : "Share screen"}
+              title={isScreenSharing ? "Stop sharing screen" : "Share screen"}
+              className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${isScreenSharing ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`}
+            >
               <Monitor size={18} />
             </button>
             <button onClick={() => setShowReactionMenu(!showReactionMenu)} className={`p-2.5 md:p-3.5 rounded-2xl transition-all duration-300 flex items-center justify-center active:scale-90 ${showReactionMenu ? (isLight ? 'bg-black text-white shadow-lg' : 'bg-white text-black shadow-lg') : (isLight ? 'bg-black/5 hover:bg-black/10 text-black' : 'bg-white/10 hover:bg-white/20 text-white')}`}>

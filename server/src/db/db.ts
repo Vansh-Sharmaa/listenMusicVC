@@ -12,6 +12,7 @@ class MockDatabase {
   roomQueues = new Map<string, any[]>();
   roomDjPasscodes = new Map<string, string>();
   roomAuthorizedDjs = new Map<string, Set<string>>();
+  roomParticipantMedia = new Map<string, Map<string, { cameraEnabled: boolean; microphoneEnabled: boolean; speaking: boolean; screenSharing: boolean }>>();
 
   constructor() {
     // Seed some royalty-free music tracks
@@ -208,7 +209,35 @@ class MockDatabase {
     const participants = this.participants.get(roomId) || [];
     const updated = participants.filter(p => p.userId !== userId);
     this.participants.set(roomId, updated);
+    this.removeParticipantMediaState(roomId, userId);
     return this.getRoom(roomId);
+  }
+
+  getParticipantMediaStates(roomId: string): Record<string, any> {
+    const states = this.roomParticipantMedia.get(roomId);
+    if (!states) return {};
+    const res: Record<string, any> = {};
+    states.forEach((val, key) => { res[key] = val; });
+    return res;
+  }
+
+  updateParticipantMediaState(roomId: string, userId: string, state: any) {
+    let states = this.roomParticipantMedia.get(roomId);
+    if (!states) {
+      states = new Map();
+      this.roomParticipantMedia.set(roomId, states);
+    }
+    const current = states.get(userId) || { cameraEnabled: false, microphoneEnabled: false, speaking: false, screenSharing: false };
+    const updated = { ...current, ...state };
+    states.set(userId, updated);
+    return updated;
+  }
+
+  removeParticipantMediaState(roomId: string, userId: string) {
+    const states = this.roomParticipantMedia.get(roomId);
+    if (states) {
+      states.delete(userId);
+    }
   }
 
   async saveChatMessage(roomId: string, userId: string, message: string) {
@@ -581,5 +610,17 @@ export const db = {
       } catch (_) {}
     }
     return db.getRoom(roomId);
+  },
+
+  getParticipantMediaStates: (roomId: string) => {
+    return mockDb.getParticipantMediaStates(roomId);
+  },
+
+  updateParticipantMediaState: (roomId: string, userId: string, state: any) => {
+    return mockDb.updateParticipantMediaState(roomId, userId, state);
+  },
+
+  removeParticipantMediaState: (roomId: string, userId: string) => {
+    return mockDb.removeParticipantMediaState(roomId, userId);
   }
 };
