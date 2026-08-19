@@ -184,7 +184,7 @@ export function setupSockets(io: Server) {
         if (action === 'change') {
           updatedState = await db.updateRoomMusicState(roomId, {
             currentTrackId: trackId,
-            isPlaying: false,
+            isPlaying: true,
             lastPosition: 0.0,
             trackData,
             updatedBy: currentUserId || socket.id

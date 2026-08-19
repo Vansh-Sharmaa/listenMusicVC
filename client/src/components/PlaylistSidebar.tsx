@@ -246,9 +246,6 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
 
   const handleTrackSelect = (track: MusicTrack) => {
     sendMusicAction('change', track.id, 0, track);
-    setTimeout(() => {
-      sendMusicAction('play', track.id, 0, track);
-    }, 100);
   };
 
   // Capture Spotify / System Audio Screen Share
