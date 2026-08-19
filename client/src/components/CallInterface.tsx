@@ -47,43 +47,37 @@ interface PeerStream {
   stream: MediaStream;
 }
 
-// Safe remote video player with guaranteed autoplay
+// Safe remote video & audio player with guaranteed playback
 const RemoteVideoPlayer: React.FC<{ stream: MediaStream; username?: string }> = ({ stream, username = 'Partner' }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !stream) return;
+    const audio = audioRef.current;
+    if (!stream) return;
 
-    video.srcObject = stream;
+    if (video) {
+      video.srcObject = stream;
+      video.play().then(() => {
+        if (video.videoWidth > 0) setIsPlaying(true);
+      }).catch(() => {});
+    }
 
-    const playVideo = async () => {
-      try {
-        await video.play();
-        if (video.videoWidth > 0) {
-          setIsPlaying(true);
-        }
-      } catch (err: any) {
-        console.warn('[WebRTC] Remote video play retry:', err?.message);
-      }
-    };
-
-    playVideo();
-    video.onloadedmetadata = () => {
-      playVideo();
-    };
-    video.oncanplay = () => {
-      playVideo();
-    };
-    video.onplaying = () => {
-      setIsPlaying(true);
-    };
+    if (audio) {
+      audio.srcObject = stream;
+      audio.play().catch(e => console.warn('[Audio] Direct remote audio playback waiting for gesture:', e));
+    }
 
     const handleTrack = () => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        playVideo();
+        videoRef.current.play().catch(() => {});
+      }
+      if (audioRef.current) {
+        audioRef.current.srcObject = stream;
+        audioRef.current.play().catch(() => {});
       }
     };
 
@@ -95,10 +89,10 @@ const RemoteVideoPlayer: React.FC<{ stream: MediaStream; username?: string }> = 
     <div className="relative w-full h-full flex items-center justify-center bg-[#18181b] overflow-hidden">
       {/* Background Avatar placeholder when video frames are loading */}
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 select-none z-0">
-        <div className="h-20 w-20 rounded-full bg-gradient-to-br from-fuchsia-600 to-indigo-600 flex items-center justify-center text-2xl font-bold text-white shadow-xl border border-white/20 animate-pulse">
+        <div className="h-16 w-16 md:h-20 md:w-20 rounded-full bg-gradient-to-br from-fuchsia-600 to-indigo-600 flex items-center justify-center text-xl md:text-2xl font-bold text-white shadow-xl border border-white/20 animate-pulse">
           {username.charAt(0).toUpperCase()}
         </div>
-        <span className="text-xs text-white/50">{username} (Connecting Video...)</span>
+        <span className="text-[11px] md:text-xs text-white/50">{username} (Connecting...)</span>
       </div>
 
       {/* Video Element - ALWAYS active in DOM so browser decodes and displays frames */}
@@ -108,7 +102,11 @@ const RemoteVideoPlayer: React.FC<{ stream: MediaStream; username?: string }> = 
         muted
         playsInline
         className={`absolute inset-0 w-full h-full object-cover z-10 transition-opacity duration-300 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}
+        onPlaying={() => setIsPlaying(true)}
       />
+
+      {/* Direct Remote Audio Stream Element (Plays screenshare audio and voice cleanly) */}
+      <audio ref={audioRef} autoPlay playsInline className="hidden" />
     </div>
   );
 };
@@ -496,8 +494,10 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     if (ytId) {
       if (audio && !audio.paused) audio.pause();
 
-      const elapsed = (getServerTime() - Number(musicState.lastPositionUpdatedAt || Date.now())) / 1000;
-      const targetPos = Math.max(0, (musicState.lastPosition || 0) + (musicState.isPlaying ? elapsed : 0));
+      const elapsed = musicState.isPlaying
+        ? (getServerTime() - Number(musicState.lastPositionUpdatedAt || Date.now())) / 1000
+        : 0;
+      const targetPos = Math.max(0, (musicState.lastPosition || 0) + elapsed);
 
       if (!ytPlayerRef.current) {
         if ((window as any).YT && (window as any).YT.Player) {
@@ -507,7 +507,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
               width: '100%',
               videoId: ytId,
               playerVars: {
-                autoplay: 1,
+                autoplay: musicState.isPlaying ? 1 : 0,
                 controls: 1,
                 disablekb: 0,
                 modestbranding: 1,
@@ -521,6 +521,9 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                   ytPlayerReadyRef.current = true;
                   currentYtVideoIdRef.current = ytId;
                   event.target.setVolume(Math.max(0, Math.min(100, Math.round(musicVolume * 100))));
+                  if (targetPos > 0) {
+                    event.target.seekTo(targetPos, true);
+                  }
                   if (musicState.isPlaying) {
                     event.target.playVideo();
                   } else {
@@ -551,7 +554,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
           if (musicState.isPlaying) {
             ytPlayerRef.current.playVideo();
-            // Smooth drift correction only if out of sync by > 4.0 seconds (prevents stuttering)
+            // Smooth drift correction only if out of sync by > 4.0 seconds
             const currentPos = ytPlayerRef.current.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : 0;
             if (Math.abs(currentPos - targetPos) > 4.0) {
               ytPlayerRef.current.seekTo(targetPos, true);
@@ -559,8 +562,8 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
           } else {
             ytPlayerRef.current.pauseVideo();
             const currentPos = ytPlayerRef.current.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : 0;
-            if (Math.abs(currentPos - (musicState.lastPosition || 0)) > 2.0) {
-              ytPlayerRef.current.seekTo(musicState.lastPosition || 0, true);
+            if (musicState.lastPosition !== undefined && Math.abs(currentPos - musicState.lastPosition) > 2.0) {
+              ytPlayerRef.current.seekTo(musicState.lastPosition, true);
             }
           }
         } catch (err) {
@@ -1337,10 +1340,17 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                 )}
                 <button
                   onClick={() => {
+                    let currentPos = musicState.lastPosition || 0;
+                    if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
+                      try { currentPos = ytPlayerRef.current.getCurrentTime(); } catch (_) {}
+                    } else if (musicAudioRef.current) {
+                      currentPos = musicAudioRef.current.currentTime;
+                    }
+
                     if (musicState.isPlaying) {
-                      sendMusicAction('pause', musicState.currentTrackId, musicState.lastPosition, musicState.currentTrack);
+                      sendMusicAction('pause', musicState.currentTrackId, currentPos, musicState.currentTrack);
                     } else {
-                      sendMusicAction('play', musicState.currentTrackId, musicState.lastPosition, musicState.currentTrack);
+                      sendMusicAction('play', musicState.currentTrackId, currentPos, musicState.currentTrack);
                     }
                   }}
                   className="bg-fuchsia-600 hover:bg-fuchsia-500 p-1.5 rounded-xl text-white transition-all active:scale-95 shadow-md shadow-fuchsia-950/40"
