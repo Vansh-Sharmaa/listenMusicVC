@@ -160,7 +160,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   onLeave
 }) => {
   // Context hooks
-  const { socket, joinRoom, sendReaction, participants, isConnected, musicState, sendMusicAction, getServerTime } = useSocket();
+  const { socket, joinRoom, sendReaction, participants, isConnected, musicState, sendMusicAction, getServerTime, isHost, hostId, permissionError, clearPermissionError } = useSocket();
   const {
     initAudio,
     processLocalMicTrack,
@@ -598,6 +598,10 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
   // Handle user seeking on the shared timeline bar
   const handleSeek = (newTime: number) => {
+    if (!isHost) {
+      alert('👑 Only the room creator / admin can seek or control the music.');
+      return;
+    }
     isSeekingRef.current = false;
     isLocalTriggeredRef.current = true;
     setSongProgress(prev => ({ ...prev, current: newTime }));
@@ -1613,7 +1617,8 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
               )}
               <span className={`absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 ${isLight ? 'bg-white/80 text-black border-black/10' : 'bg-black/60 text-white border-white/10'}`}>
                 <span className={`h-2 w-2 rounded-full ${micOn ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                {username} (You)
+                <span>{username} (You)</span>
+                {isHost && <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.2 rounded-full font-bold">👑 Host</span>}
               </span>
             </div>
 
@@ -1641,7 +1646,8 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                     <RemoteVideoPlayer stream={peer.stream} username={peer.username} />
                     <span className={`absolute bottom-2 left-2 md:bottom-4 md:left-4 text-[10px] md:text-xs font-semibold px-2.5 py-0.5 md:px-3 md:py-1 rounded-full border backdrop-blur-sm flex items-center gap-1.5 z-10 ${isLight ? 'bg-white/80 text-black border-black/10' : 'bg-black/60 text-white border-white/10'}`}>
                       <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                      {peer.username}
+                      <span>{peer.username}</span>
+                      {hostId === peer.userId && <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.2 rounded-full font-bold">👑 Host</span>}
                     </span>
                   </div>
                 ];
@@ -1896,12 +1902,14 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                           min={0}
                           max={songProgress.duration > 0 ? songProgress.duration : (musicState.currentTrack?.duration || 240)}
                           value={songProgress.current}
-                          onMouseDown={() => { isSeekingRef.current = true; }}
-                          onTouchStart={() => { isSeekingRef.current = true; }}
-                          onChange={(e) => setSongProgress(prev => ({ ...prev, current: parseFloat(e.target.value) }))}
-                          onMouseUp={(e) => handleSeek(parseFloat((e.target as HTMLInputElement).value))}
-                          onTouchEnd={(e) => handleSeek(parseFloat((e.target as HTMLInputElement).value))}
-                          className="flex-1 accent-fuchsia-500 h-1.5 bg-white/20 rounded-lg cursor-pointer transition-all"
+                          disabled={!isHost}
+                          onMouseDown={() => { if (isHost) isSeekingRef.current = true; }}
+                          onTouchStart={() => { if (isHost) isSeekingRef.current = true; }}
+                          onChange={(e) => { if (isHost) setSongProgress(prev => ({ ...prev, current: parseFloat(e.target.value) })); }}
+                          onMouseUp={(e) => { if (isHost) handleSeek(parseFloat((e.target as HTMLInputElement).value)); }}
+                          onTouchEnd={(e) => { if (isHost) handleSeek(parseFloat((e.target as HTMLInputElement).value)); }}
+                          className={`flex-1 accent-fuchsia-500 h-1.5 bg-white/20 rounded-lg transition-all ${isHost ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+                          title={isHost ? "Scrub timeline (Room Host)" : "Synced with Room Host (Admin)"}
                         />
                         <span className="text-xs text-white/60 font-mono w-10">
                           {Math.floor((songProgress.duration || musicState.currentTrack?.duration || 0) / 60)}:{(Math.floor((songProgress.duration || musicState.currentTrack?.duration || 0) % 60)).toString().padStart(2, '0')}
@@ -1912,14 +1920,19 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                         <div className="flex items-center gap-2">
                           <button
                             onClick={handleSkipPrev}
-                            className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-xl text-xs transition-all active:scale-95 border border-white/15"
-                            title="Previous Track"
+                            disabled={!isHost}
+                            className={`p-2 rounded-xl text-xs transition-all border ${isHost ? 'bg-white/10 hover:bg-white/20 text-white active:scale-95 border-white/15' : 'bg-white/5 text-white/30 border-white/5 cursor-not-allowed'}`}
+                            title={isHost ? "Previous Track" : "Only Host can change tracks"}
                           >
                             <SkipBack size={14} />
                           </button>
 
                           <button
                             onClick={() => {
+                              if (!isHost) {
+                                alert('👑 Only the room host / admin can control playback.');
+                                return;
+                              }
                               let currentPos = musicState.lastPosition || 0;
                               if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
                                 try { currentPos = ytPlayerRef.current.getCurrentTime(); } catch (_) {}
@@ -1933,16 +1946,22 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                                 sendMusicAction('play', musicState.currentTrackId, currentPos, musicState.currentTrack);
                               }
                             }}
-                            className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold px-4 py-2 rounded-xl transition-all active:scale-95 shadow-md shadow-fuchsia-950/40 flex items-center gap-2 text-xs"
+                            className={`px-4 py-2 rounded-xl font-bold transition-all flex items-center gap-2 text-xs shadow-md ${
+                              isHost
+                                ? 'bg-fuchsia-600 hover:bg-fuchsia-500 text-white active:scale-95 shadow-fuchsia-950/40'
+                                : 'bg-white/10 text-white/50 cursor-not-allowed'
+                            }`}
+                            title={isHost ? "Play/Pause (Room Host)" : "Controlled by Room Host"}
                           >
-                            {musicState.isPlaying ? <Pause size={14} fill="white" /> : <Play size={14} fill="white" />}
-                            <span>{musicState.isPlaying ? 'Pause for Room' : 'Play for Room'}</span>
+                            {musicState.isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
+                            <span>{isHost ? (musicState.isPlaying ? 'Pause for Room' : 'Play for Room') : (musicState.isPlaying ? 'Playing (Host Controlled)' : 'Paused (Host Controlled)')}</span>
                           </button>
 
                           <button
                             onClick={handleSkipNext}
-                            className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-xl text-xs transition-all active:scale-95 border border-white/15"
-                            title="Next Track"
+                            disabled={!isHost}
+                            className={`p-2 rounded-xl text-xs transition-all border ${isHost ? 'bg-white/10 hover:bg-white/20 text-white active:scale-95 border-white/15' : 'bg-white/5 text-white/30 border-white/5 cursor-not-allowed'}`}
+                            title={isHost ? "Next Track" : "Only Host can change tracks"}
                           >
                             <SkipForward size={14} />
                           </button>
@@ -2023,41 +2042,51 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  <button
-                    onClick={handleSkipPrev}
-                    className="p-1.5 rounded-lg text-xs bg-white/5 hover:bg-white/15 border border-white/10 text-white/80 hover:text-white transition-all"
-                    title="Previous Track"
-                  >
-                    <SkipBack size={13} />
-                  </button>
+                  {isHost && (
+                    <button
+                      onClick={handleSkipPrev}
+                      className="p-1.5 rounded-lg text-xs bg-white/5 hover:bg-white/15 border border-white/10 text-white/80 hover:text-white transition-all"
+                      title="Previous Track"
+                    >
+                      <SkipBack size={13} />
+                    </button>
+                  )}
 
-                  <button
-                    onClick={() => {
-                      let currentPos = musicState.lastPosition || 0;
-                      if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
-                        try { currentPos = ytPlayerRef.current.getCurrentTime(); } catch (_) {}
-                      } else if (musicAudioRef.current) {
-                        currentPos = musicAudioRef.current.currentTime;
-                      }
+                  {isHost ? (
+                    <button
+                      onClick={() => {
+                        let currentPos = musicState.lastPosition || 0;
+                        if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
+                          try { currentPos = ytPlayerRef.current.getCurrentTime(); } catch (_) {}
+                        } else if (musicAudioRef.current) {
+                          currentPos = musicAudioRef.current.currentTime;
+                        }
 
-                      if (musicState.isPlaying) {
-                        sendMusicAction('pause', musicState.currentTrackId, currentPos, musicState.currentTrack);
-                      } else {
-                        sendMusicAction('play', musicState.currentTrackId, currentPos, musicState.currentTrack);
-                      }
-                    }}
-                    className="bg-fuchsia-600 hover:bg-fuchsia-500 p-1.5 rounded-xl text-white transition-all active:scale-95 shadow-md shadow-fuchsia-950/40"
-                  >
-                    {musicState.isPlaying ? <Pause size={14} fill="white" /> : <Play size={14} fill="white" />}
-                  </button>
+                        if (musicState.isPlaying) {
+                          sendMusicAction('pause', musicState.currentTrackId, currentPos, musicState.currentTrack);
+                        } else {
+                          sendMusicAction('play', musicState.currentTrackId, currentPos, musicState.currentTrack);
+                        }
+                      }}
+                      className="bg-fuchsia-600 hover:bg-fuchsia-500 p-1.5 rounded-xl text-white transition-all active:scale-95 shadow-md shadow-fuchsia-950/40"
+                    >
+                      {musicState.isPlaying ? <Pause size={14} fill="white" /> : <Play size={14} fill="white" />}
+                    </button>
+                  ) : (
+                    <span className="text-[10px] font-bold px-2 py-1 rounded-lg bg-white/5 text-white/40 border border-white/10">
+                      👑 Host DJ
+                    </span>
+                  )}
 
-                  <button
-                    onClick={handleSkipNext}
-                    className="p-1.5 rounded-lg text-xs bg-white/5 hover:bg-white/15 border border-white/10 text-white/80 hover:text-white transition-all"
-                    title="Next Track"
-                  >
-                    <SkipForward size={13} />
-                  </button>
+                  {isHost && (
+                    <button
+                      onClick={handleSkipNext}
+                      className="p-1.5 rounded-lg text-xs bg-white/5 hover:bg-white/15 border border-white/10 text-white/80 hover:text-white transition-all"
+                      title="Next Track"
+                    >
+                      <SkipForward size={13} />
+                    </button>
+                  )}
 
                   <button
                     onClick={() => setActiveSidebar(activeSidebar === 'lyrics' ? null : 'lyrics')}
@@ -2094,19 +2123,22 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                   max={Math.max(1, songProgress.duration || 180)}
                   step="0.5"
                   value={songProgress.current}
-                  onMouseDown={() => { isSeekingRef.current = true; }}
-                  onTouchStart={() => { isSeekingRef.current = true; }}
+                  disabled={!isHost}
+                  onMouseDown={() => { if (isHost) isSeekingRef.current = true; }}
+                  onTouchStart={() => { if (isHost) isSeekingRef.current = true; }}
                   onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    setSongProgress(prev => ({ ...prev, current: val }));
+                    if (isHost) {
+                      const val = parseFloat(e.target.value);
+                      setSongProgress(prev => ({ ...prev, current: val }));
+                    }
                   }}
                   onMouseUp={(e) => {
-                    handleSeek(parseFloat((e.target as HTMLInputElement).value));
+                    if (isHost) handleSeek(parseFloat((e.target as HTMLInputElement).value));
                   }}
                   onTouchEnd={(e) => {
-                    handleSeek(parseFloat((e.target as HTMLInputElement).value));
+                    if (isHost) handleSeek(parseFloat((e.target as HTMLInputElement).value));
                   }}
-                  className="flex-1 h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-fuchsia-500 hover:h-2 transition-all"
+                  className={`flex-1 h-1.5 bg-white/10 rounded-lg appearance-none accent-fuchsia-500 transition-all ${isHost ? 'cursor-pointer hover:h-2' : 'cursor-not-allowed opacity-50'}`}
                 />
                 <span className="text-[10px] text-white/50 font-mono w-7">
                   {Math.floor((songProgress.duration || 180) / 60)}:{Math.floor((songProgress.duration || 180) % 60).toString().padStart(2, '0')}

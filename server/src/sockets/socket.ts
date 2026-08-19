@@ -59,6 +59,7 @@ export function setupSockets(io: Server) {
         // Send room state confirmation
         socket.emit('room:joined', {
           roomName: room?.name,
+          hostId: room?.hostId,
           participants: room?.participants || [],
           musicState,
           chatHistory,
@@ -164,6 +165,20 @@ export function setupSockets(io: Server) {
       if (!roomId) return;
 
       try {
+        // Enforce Host-Only / Admin Music Control
+        const room = await db.getRoom(roomId);
+        const hostId = room?.hostId;
+        const requesterId = currentUserId || (socket as any)?.data?.userId;
+
+        if (hostId && requesterId && requesterId !== hostId) {
+          console.warn(`[Music Permission Denied] User ${currentUsername} (${requesterId}) is not the host (${hostId}) of room ${roomId}`);
+          socket.emit('music:permission-denied', {
+            message: 'Only the room creator (Admin / Host) can change or control the music.',
+            action
+          });
+          return;
+        }
+
         const currentServerState = await db.getRoomMusicState(roomId);
         const serverNow = Date.now();
 

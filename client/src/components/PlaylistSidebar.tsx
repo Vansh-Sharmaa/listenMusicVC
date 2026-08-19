@@ -25,7 +25,7 @@ interface PlaylistSidebarProps {
 
 export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark', onStartScreenShare }) => {
   const isLight = theme === 'light';
-  const { musicState, sendMusicAction } = useSocket();
+  const { musicState, sendMusicAction, isHost, hostId, permissionError, clearPermissionError } = useSocket();
   const { registerRemoteScreenShareTrack } = useAudioMixer();
 
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
@@ -229,6 +229,10 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
   const activeTrack = tracks.find(t => t.id === musicState.currentTrackId) || musicState.currentTrack;
 
   const handlePlayPause = () => {
+    if (!isHost) {
+      alert('👑 Only the room host / admin can play, pause, or change the music.');
+      return;
+    }
     const currentPos = musicState.lastPosition || 0;
 
     if (musicState.isPlaying) {
@@ -239,6 +243,10 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
   };
 
   const handleTrackSelect = (track: MusicTrack) => {
+    if (!isHost) {
+      alert('👑 Only the room host / admin can change the music for everyone.');
+      return;
+    }
     sendMusicAction('change', track.id, 0, track);
   };
 
@@ -368,6 +376,10 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
   // Handle Quick Play or Search Submit
   const handleQuickPlay = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isHost) {
+      alert('👑 Only the room host / admin can search and play music for the room.');
+      return;
+    }
     const query = searchQuery.trim();
     if (!query) return;
 
@@ -447,14 +459,45 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
           <Music size={20} className={isLight ? "text-fuchsia-600" : "text-fuchsia-400"} />
           <h2 className="text-lg font-semibold tracking-wide">Shared Music Hub</h2>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="bg-fuchsia-600 hover:bg-fuchsia-500 transition-all p-1.5 rounded-lg active:scale-95 flex items-center justify-center text-white shadow-md shadow-fuchsia-950/40"
-          title="Add Custom Track"
-        >
-          <Plus size={16} />
-        </button>
+        {isHost && (
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="bg-fuchsia-600 hover:bg-fuchsia-500 transition-all p-1.5 rounded-lg active:scale-95 flex items-center justify-center text-white shadow-md shadow-fuchsia-950/40"
+            title="Add Custom Track"
+          >
+            <Plus size={16} />
+          </button>
+        )}
       </div>
+
+      {/* Host DJ Status Banner */}
+      <div className={`px-3 py-2 text-[11px] font-semibold border-b flex items-center justify-between ${
+        isHost
+          ? isLight ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-amber-950/30 border-amber-500/20 text-amber-300'
+          : isLight ? 'bg-black/5 border-black/5 text-black/60' : 'bg-white/5 border-white/5 text-white/50'
+      }`}>
+        <div className="flex items-center gap-1.5 truncate">
+          <span>👑</span>
+          <span className="truncate">
+            {isHost ? 'You are the Room Host (Admin DJ)' : 'Host-Only DJ Mode Active'}
+          </span>
+        </div>
+        <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase font-bold ${
+          isHost
+            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+            : 'bg-white/10 text-white/40 border border-white/10'
+        }`}>
+          {isHost ? 'DJ ADMIN' : 'LISTENER'}
+        </span>
+      </div>
+
+      {/* Permission Denied Alert Toast */}
+      {permissionError && (
+        <div className="p-2.5 bg-red-500/20 border-b border-red-500/30 text-red-200 text-xs flex items-center justify-between animate-fade-in">
+          <span>⚠️ {permissionError}</span>
+          <button onClick={clearPermissionError} className="text-xs font-bold px-1.5 text-red-300">✕</button>
+        </div>
+      )}
 
       {/* Mode Tabs: YouTube | Monochrome */}
       <div className={`flex border-b ${isLight ? 'border-black/5' : 'border-white/10'}`}>
@@ -505,6 +548,10 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ theme = 'dark'
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
+                if (!isHost) {
+                  alert('👑 Only the room host / admin can add or play Monochrome music.');
+                  return;
+                }
                 const url = monoUrl.trim();
                 if (!url) return;
                 setMonoSubmitting(true);

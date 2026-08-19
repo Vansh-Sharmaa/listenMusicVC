@@ -55,6 +55,10 @@ interface SocketContextType {
   getServerTime: () => number;
   activeReaction: { userId: string; username: string; emoji: string; id: number } | null;
   roomName: string;
+  hostId: string | null;
+  isHost: boolean;
+  permissionError: string | null;
+  clearPermissionError: () => void;
 }
 
 const SocketContext = createContext<SocketContextType | undefined>(undefined);
@@ -72,6 +76,9 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [roomName, setRoomName] = useState<string>('');
+  const [hostId, setHostId] = useState<string | null>(null);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [myUserId, setMyUserId] = useState<string | null>(null);
   const [activeReaction, setActiveReaction] = useState<SocketContextType['activeReaction']>(null);
   const [clockOffset, setClockOffset] = useState<number>(0);
   const [musicState, setMusicState] = useState<MusicState>({
@@ -81,6 +88,9 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     lastPositionUpdatedAt: 0,
     queue: []
   });
+
+  const isHost = Boolean(hostId && myUserId && hostId === myUserId);
+  const clearPermissionError = useCallback(() => setPermissionError(null), []);
 
   // Use ref for socket so all callbacks always have latest socket reference
   // Also track as state so consumers can react to socket being available
@@ -152,12 +162,16 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Room joined confirmation
     sock.on('room:joined', (payload: {
       roomName: string;
+      hostId?: string;
       participants: any[];
       musicState: any;
       chatHistory: ChatMessage[];
     }) => {
-      console.log(`[Socket] room:joined - name: "${payload.roomName}", participants: ${payload.participants?.length}`);
+      console.log(`[Socket] room:joined - name: "${payload.roomName}", hostId: "${payload.hostId}", participants: ${payload.participants?.length}`);
       setRoomName(payload.roomName || '');
+      if (payload.hostId) {
+        setHostId(payload.hostId);
+      }
       setChatMessages(payload.chatHistory || []);
       if (payload.participants) {
         setParticipants(payload.participants.map(p => ({
@@ -169,6 +183,13 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (payload.musicState) {
         setMusicState(payload.musicState);
       }
+    });
+
+    // Permission denied on music actions (if non-host tries to change track)
+    sock.on('music:permission-denied', (payload: { message: string; action?: string }) => {
+      console.warn(`[Socket] Music permission denied:`, payload.message);
+      setPermissionError(payload.message || 'Only the room creator / admin can change the music.');
+      setTimeout(() => setPermissionError(null), 4000);
     });
 
     // User joined/left notifications
@@ -262,17 +283,15 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [emitRoomJoin]);
 
   const joinRoom = useCallback((roomId: string, userId: string, username: string) => {
-    console.log(`[Socket] joinRoom: ${username} → ${roomId}`);
-    pendingRoomJoinRef.current = { roomId, userId, username };
     roomIdRef.current = roomId;
-
+    setMyUserId(userId);
     const sock = socketRef.current;
-    if (sock && sock.connected) {
+    if (sock && isConnected) {
       emitRoomJoin(sock, roomId, userId, username);
     } else {
-      console.log('[Socket] Socket not connected yet - will emit room:join on connect');
+      pendingRoomJoinRef.current = { roomId, userId, username };
     }
-  }, [emitRoomJoin]);
+  }, [isConnected, emitRoomJoin]);
 
   const sendChatMessage = useCallback((message: string) => {
     const sock = socketRef.current;
@@ -342,7 +361,11 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         clockOffset,
         getServerTime,
         activeReaction,
-        roomName
+        roomName,
+        hostId,
+        isHost,
+        permissionError,
+        clearPermissionError
       }}
     >
       {children}

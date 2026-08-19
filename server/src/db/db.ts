@@ -126,6 +126,33 @@ class MockDatabase {
   }
 
   async joinRoom(roomId: string, userId: string, username: string) {
+    let room = this.rooms.get(roomId);
+    if (!room) {
+      room = {
+        id: roomId,
+        name: roomId,
+        hostId: userId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      this.rooms.set(roomId, room);
+      this.participants.set(roomId, []);
+      this.messages.set(roomId, []);
+      const musicState = {
+        id: randomUUID(),
+        roomId,
+        currentTrackId: null,
+        isPlaying: false,
+        lastPosition: 0.0,
+        lastPositionUpdatedAt: new Date(),
+        updatedAt: new Date(),
+      };
+      this.roomMusicStates.set(roomId, musicState);
+      this.roomQueues.set(roomId, []);
+    } else if (!room.hostId) {
+      room.hostId = userId;
+    }
+
     const participants = this.participants.get(roomId) || [];
     const user = this.users.get(userId) || { id: userId, username, createdAt: new Date() };
     if (!this.users.has(userId)) {
@@ -336,6 +363,28 @@ export const db = {
   joinRoom: async (roomId: string, userId: string, username: string) => {
     if (useMock || !prisma) return mockDb.joinRoom(roomId, userId, username);
     
+    // Ensure room exists with hostId
+    let room = await prisma.room.findUnique({ where: { id: roomId } });
+    if (!room) {
+      try {
+        room = await prisma.room.create({
+          data: {
+            id: roomId,
+            name: roomId,
+            hostId: userId,
+            musicState: { create: {} }
+          }
+        });
+      } catch (_) {
+        room = await prisma.room.findUnique({ where: { id: roomId } });
+      }
+    } else if (!room.hostId) {
+      await prisma.room.update({
+        where: { id: roomId },
+        data: { hostId: userId }
+      });
+    }
+
     // Ensure user exists
     let user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
