@@ -64,10 +64,10 @@ const RemoteVideoPlayer: React.FC<{
   stream: MediaStream;
   username?: string;
   cameraEnabled?: boolean;
-}> = ({ stream, username = 'Partner', cameraEnabled = false }) => {
+}> = ({ stream, username = 'Partner', cameraEnabled }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [isVideoPlaying, setIsVideoPlaying] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -77,7 +77,7 @@ const RemoteVideoPlayer: React.FC<{
     if (video) {
       video.srcObject = stream;
       video.play().then(() => {
-        if (video.videoWidth > 0) setIsPlaying(true);
+        if (video.videoWidth > 0) setIsVideoPlaying(true);
       }).catch(() => {});
     }
 
@@ -86,10 +86,14 @@ const RemoteVideoPlayer: React.FC<{
       audio.play().catch(e => console.warn('[Audio] Direct remote audio playback waiting for gesture:', e));
     }
 
-    const handleTrack = () => {
+    const checkTrackStatus = () => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => {});
+        videoRef.current.play().then(() => {
+          if (videoRef.current && videoRef.current.videoWidth > 0) {
+            setIsVideoPlaying(true);
+          }
+        }).catch(() => {});
       }
       if (audioRef.current) {
         audioRef.current.srcObject = stream;
@@ -97,33 +101,37 @@ const RemoteVideoPlayer: React.FC<{
       }
     };
 
-    stream.onaddtrack = handleTrack;
-    stream.onremovetrack = handleTrack;
+    stream.onaddtrack = checkTrackStatus;
+    stream.onremovetrack = checkTrackStatus;
   }, [stream]);
+
+  // Video is visible if camera is explicitly enabled OR if incoming video track is active
+  const showVideo = cameraEnabled !== undefined ? cameraEnabled : isVideoPlaying;
 
   return (
     <div className="relative w-full h-full flex items-center justify-center bg-[#18181b] overflow-hidden">
       {/* Avatar placeholder when camera is OFF */}
-      <div className={`absolute inset-0 flex flex-col items-center justify-center gap-2.5 select-none z-0 transition-opacity duration-300 ${cameraEnabled ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+      <div className={`absolute inset-0 flex flex-col items-center justify-center gap-2.5 select-none z-0 transition-opacity duration-300 ${showVideo ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         <div className="h-16 w-16 md:h-20 md:w-20 rounded-full bg-gradient-to-br from-fuchsia-600 to-indigo-600 flex items-center justify-center text-xl md:text-2xl font-bold text-white shadow-xl border border-white/20">
           {username.charAt(0).toUpperCase()}
         </div>
         <div className="flex flex-col items-center gap-1">
           <span className="text-[11px] md:text-xs text-white/70 font-semibold">{username}</span>
-          <span className="text-[10px] text-white/40 flex items-center gap-1 bg-black/40 px-2 py-0.5 rounded-full border border-white/5">
+          <span className="text-[10px] text-white/40 flex items-center gap-1 bg-black/40 px-2.5 py-0.5 rounded-full border border-white/5">
             <VideoOff size={10} /> Camera Off
           </span>
         </div>
       </div>
 
-      {/* Video Element - Shown when camera is ON */}
+      {/* Video Element - Shown when camera is ON or receiving frames */}
       <video
         ref={videoRef}
         autoPlay
         muted
         playsInline
-        className={`absolute inset-0 w-full h-full object-cover z-10 transition-opacity duration-300 ${cameraEnabled ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-        onPlaying={() => setIsPlaying(true)}
+        className={`absolute inset-0 w-full h-full object-cover z-10 transition-opacity duration-300 ${showVideo ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        onPlaying={() => setIsVideoPlaying(true)}
+        onLoadedMetadata={() => setIsVideoPlaying(true)}
       />
 
       {/* Direct Remote Audio Stream Element */}
@@ -326,6 +334,9 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   const musicAudioRef = useRef<HTMLAudioElement | null>(null);
   const isSyncingMusicRef = useRef(false);
 
+  // Mapping socketId -> { userId, username } so remote peer cards have the actual userId
+  const socketIdToPeerInfoRef = useRef<Map<string, { userId: string; username: string }>>(new Map());
+
   // Senders for screen share tracks per peer connection
   const screenShareSendersRef = useRef<Map<string, RTCRtpSender[]>>(new Map());
 
@@ -501,12 +512,16 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       // Create a fresh MediaStream reference so React state updates and video tags rebind
       const freshStream = new MediaStream(peerStream.getTracks());
 
+      const peerInfo = socketIdToPeerInfoRef.current.get(targetSocketId);
+      const actualUserId = peerInfo?.userId || targetSocketId;
+      const actualUsername = peerInfo?.username || peerUsername;
+
       setRemotePeers(prev => {
         const updated = new Map(prev);
         updated.set(targetSocketId, {
           socketId: targetSocketId,
-          userId: targetSocketId,
-          username: peerUsername,
+          userId: actualUserId,
+          username: actualUsername,
           stream: freshStream
         });
         return updated;
@@ -1171,6 +1186,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       console.log('[WebRTC] peer-list received:', payload.peers);
       for (const peer of payload.peers) {
         if (peer.socketId === socket.id) continue; // skip self
+        socketIdToPeerInfoRef.current.set(peer.socketId, { userId: peer.userId, username: peer.username });
         const pc = createPeerConnection(peer.socketId, peer.username || 'Participant');
 
         if (!localMediaReadyRef.current) {
@@ -1198,10 +1214,10 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     };
 
     // ── B. Existing peer in room: a new peer just joined ──
-    // Pre-create the PC so we're ready when the offer arrives.
     const onPeerJoined = (payload: { socketId: string; userId: string; username: string }) => {
       console.log('[WebRTC] peer-joined:', payload);
       if (payload.socketId === socket.id) return; // skip self
+      socketIdToPeerInfoRef.current.set(payload.socketId, { userId: payload.userId, username: payload.username });
       createPeerConnection(payload.socketId, payload.username || 'Participant');
     };
 
