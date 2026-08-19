@@ -89,17 +89,22 @@ export async function fetchLyrics(
         lyricsCache.set(cacheKey, lyricsData);
         return lyricsData;
       } else if (data.plainLyrics) {
-        // Plain text fallback if not timestamped
-        const plainLines: LyricLine[] = data.plainLyrics
+        // Plain text fallback from Lyrist/Lyrics.ovh mapped dynamically across track duration
+        const rawLines = data.plainLyrics
           .split('\n')
-          .filter((l: string) => l.trim().length > 0)
-          .map((text: string, idx: number) => ({
-            time: idx * 5, // rough estimate
-            text: text.trim()
-          }));
+          .map((l: string) => l.trim())
+          .filter((l: string) => l.length > 0 && !/^\[.+\]$/.test(l));
+
+        const totalDuration = duration || (rawLines.length * 4.5);
+        const timePerLine = rawLines.length > 0 ? Math.max(2.5, (totalDuration * 0.92) / rawLines.length) : 4.0;
+
+        const plainLines: LyricLine[] = rawLines.map((text: string, idx: number) => ({
+          time: Math.round(idx * timePerLine * 10) / 10,
+          text
+        }));
 
         const lyricsData: LyricsData = {
-          synced: false,
+          synced: true,
           lines: plainLines,
           plainText: data.plainLyrics,
           instrumental: data.instrumental

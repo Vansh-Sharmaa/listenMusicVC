@@ -331,28 +331,102 @@ apiRouter.get('/lyrics', async (req: Request, res: Response) => {
       });
     }
 
-    // 2. Fallback: Search LRCLIB
-    const searchRes = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(`${cleanArtist} ${cleanTitle}`.trim())}`, {
-      headers: { 'User-Agent': 'ListenMusicVC/1.0 (https://listen-music-vc.vercel.app)' }
-    });
-
-    if (searchRes.ok) {
-      const results = (await searchRes.json()) as any;
-      if (Array.isArray(results) && results.length > 0) {
-        // Find best match with synced lyrics
-        const best = results.find((r: any) => r.syncedLyrics) || results[0];
-        return res.json({
-          id: best.id,
-          trackName: best.trackName,
-          artistName: best.artistName,
-          plainLyrics: best.plainLyrics,
-          syncedLyrics: best.syncedLyrics,
-          instrumental: best.instrumental
-        });
+    // 2. Fallback: LRCLIB Fuzzy Search
+    try {
+      const searchRes = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(`${cleanArtist} ${cleanTitle}`.trim())}`, {
+        headers: { 'User-Agent': 'ListenMusicVC/1.0 (https://listen-music-vc.vercel.app)' }
+      });
+      if (searchRes.ok) {
+        const results = (await searchRes.json()) as any;
+        if (Array.isArray(results) && results.length > 0) {
+          const best = results.find((r: any) => r.syncedLyrics) || results[0];
+          return res.json({
+            id: best.id,
+            trackName: best.trackName,
+            artistName: best.artistName,
+            plainLyrics: best.plainLyrics,
+            syncedLyrics: best.syncedLyrics,
+            instrumental: best.instrumental
+          });
+        }
       }
+    } catch (searchErr) {
+      console.warn('[Lyrics API] LRCLIB search failed:', searchErr);
     }
 
-    return res.status(404).json({ error: 'Lyrics not found' });
+    // 3. Fallback: Lyrist Open Lyrics API (Supports global, bollywood, indie, pop)
+    try {
+      const lyristRes = await fetch(`https://lyrist.vercel.app/api/${encodeURIComponent(cleanTitle)}/${encodeURIComponent(cleanArtist)}`);
+      if (lyristRes.ok) {
+        const lyristData = (await lyristRes.json()) as any;
+        if (lyristData && lyristData.lyrics) {
+          return res.json({
+            id: `lyrist-${Date.now()}`,
+            trackName: lyristData.title || cleanTitle,
+            artistName: lyristData.artist || cleanArtist,
+            plainLyrics: lyristData.lyrics,
+            syncedLyrics: null,
+            instrumental: false
+          });
+        }
+      }
+    } catch (lyristErr) {
+      console.warn('[Lyrics API] Lyrist fallback failed:', lyristErr);
+    }
+
+    // 4. Fallback: Lyrics.ovh Open API
+    try {
+      const ovhRes = await fetch(`https://api.lyrics.ovh/v1/${encodeURIComponent(cleanArtist || 'Various')}/${encodeURIComponent(cleanTitle)}`);
+      if (ovhRes.ok) {
+        const ovhData = (await ovhRes.json()) as any;
+        if (ovhData && ovhData.lyrics) {
+          return res.json({
+            id: `ovh-${Date.now()}`,
+            trackName: cleanTitle,
+            artistName: cleanArtist,
+            plainLyrics: ovhData.lyrics,
+            syncedLyrics: null,
+            instrumental: false
+          });
+        }
+      }
+    } catch (ovhErr) {
+      console.warn('[Lyrics API] Lyrics.ovh fallback failed:', ovhErr);
+    }
+
+    // 5. Fallback: NetEase Cloud Music Synced LRC API (Huge database for international & Asian music)
+    try {
+      const neteaseSearch = await fetch(`https://music.163.com/api/search/get/web?s=${encodeURIComponent(`${cleanTitle} ${cleanArtist}`.trim())}&type=1&limit=5`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+      if (neteaseSearch.ok) {
+        const neteaseSearchData = (await neteaseSearch.json()) as any;
+        const songId = neteaseSearchData?.result?.songs?.[0]?.id;
+        if (songId) {
+          const lrcFetch = await fetch(`https://music.163.com/api/song/lyric?os=pc&id=${songId}&lv=-1&kv=-1&tv=-1`, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+          if (lrcFetch.ok) {
+            const lrcData = (await lrcFetch.json()) as any;
+            const lrcText = lrcData?.lrc?.lyric;
+            if (lrcText) {
+              return res.json({
+                id: `netease-${songId}`,
+                trackName: cleanTitle,
+                artistName: cleanArtist,
+                plainLyrics: lrcText.replace(/\[\d{2}:\d{2}\.?\d*\]/g, '').trim(),
+                syncedLyrics: lrcText,
+                instrumental: false
+              });
+            }
+          }
+        }
+      }
+    } catch (neteaseErr) {
+      console.warn('[Lyrics API] NetEase fallback failed:', neteaseErr);
+    }
+
+    return res.status(404).json({ error: 'Lyrics not found across platforms' });
   } catch (err) {
     console.error('[Lyrics API] Fetch error:', err);
     return res.status(500).json({ error: 'Failed to fetch lyrics' });
