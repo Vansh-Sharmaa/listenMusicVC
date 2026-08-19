@@ -442,6 +442,50 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     }
   }, [musicVolume]);
 
+  // Live interactive timeline position tracking
+  const [songProgress, setSongProgress] = useState<{ current: number; duration: number }>({ current: 0, duration: 0 });
+  const isSeekingRef = useRef<boolean>(false);
+  const isLocalTriggeredRef = useRef<boolean>(false);
+
+  // Periodic smooth UI progress updater
+  useEffect(() => {
+    const updateTime = () => {
+      if (isSeekingRef.current) return;
+      if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
+        try {
+          const cur = ytPlayerRef.current.getCurrentTime() || 0;
+          const dur = ytPlayerRef.current.getDuration() || (musicState.currentTrack?.duration || 0);
+          setSongProgress({ current: cur, duration: dur });
+        } catch (_) {}
+      } else if (musicAudioRef.current) {
+        setSongProgress({
+          current: musicAudioRef.current.currentTime || 0,
+          duration: musicAudioRef.current.duration || (musicState.currentTrack?.duration || 0)
+        });
+      }
+    };
+
+    const interval = setInterval(updateTime, 500);
+    return () => clearInterval(interval);
+  }, [musicState]);
+
+  // Handle user seeking on the shared timeline bar
+  const handleSeek = (newTime: number) => {
+    isSeekingRef.current = false;
+    isLocalTriggeredRef.current = true;
+    setSongProgress(prev => ({ ...prev, current: newTime }));
+
+    if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.seekTo) {
+      try { ytPlayerRef.current.seekTo(newTime, true); } catch (_) {}
+    }
+    if (musicAudioRef.current) {
+      musicAudioRef.current.currentTime = newTime;
+    }
+
+    sendMusicAction('seek', musicState.currentTrackId, newTime, musicState.currentTrack);
+    setTimeout(() => { isLocalTriggeredRef.current = false; }, 500);
+  };
+
   // Permanent Shared Music Playback Synchronization (Ultra-Smooth YouTube + Direct Audio Engine)
   useEffect(() => {
     const audio = musicAudioRef.current;
@@ -530,6 +574,23 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                     event.target.pauseVideo();
                   }
                 },
+                onStateChange: (event: any) => {
+                  // If user clicked play/pause directly on YouTube native player
+                  if (isLocalTriggeredRef.current) return;
+
+                  // YT.PlayerState.PLAYING = 1, PAUSED = 2
+                  if (event.data === 1 && !musicState.isPlaying) {
+                    const curTime = event.target.getCurrentTime ? event.target.getCurrentTime() : 0;
+                    isLocalTriggeredRef.current = true;
+                    sendMusicAction('play', musicState.currentTrackId, curTime, musicState.currentTrack);
+                    setTimeout(() => { isLocalTriggeredRef.current = false; }, 600);
+                  } else if (event.data === 2 && musicState.isPlaying) {
+                    const curTime = event.target.getCurrentTime ? event.target.getCurrentTime() : 0;
+                    isLocalTriggeredRef.current = true;
+                    sendMusicAction('pause', musicState.currentTrackId, curTime, musicState.currentTrack);
+                    setTimeout(() => { isLocalTriggeredRef.current = false; }, 600);
+                  }
+                },
                 onError: (err: any) => {
                   console.warn('[YouTube Player] Error:', err);
                 }
@@ -554,15 +615,15 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
           if (musicState.isPlaying) {
             ytPlayerRef.current.playVideo();
-            // Smooth drift correction only if out of sync by > 4.0 seconds
+            // Smooth drift correction only if out of sync by > 3.0 seconds
             const currentPos = ytPlayerRef.current.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : 0;
-            if (Math.abs(currentPos - targetPos) > 4.0) {
+            if (Math.abs(currentPos - targetPos) > 3.0) {
               ytPlayerRef.current.seekTo(targetPos, true);
             }
           } else {
             ytPlayerRef.current.pauseVideo();
             const currentPos = ytPlayerRef.current.getCurrentTime ? ytPlayerRef.current.getCurrentTime() : 0;
-            if (musicState.lastPosition !== undefined && Math.abs(currentPos - musicState.lastPosition) > 2.0) {
+            if (musicState.lastPosition !== undefined && Math.abs(currentPos - musicState.lastPosition) > 1.5) {
               ytPlayerRef.current.seekTo(musicState.lastPosition, true);
             }
           }
@@ -1309,54 +1370,86 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
             </button>
           </div>
 
-          {/* Global Synchronized Music Pill (when song is selected) */}
+          {/* Global Synchronized Music Pill & Interactive Shared Seek Bar (when song is selected) */}
           {musicState.currentTrack && (
-            <div className="absolute top-2 right-2 md:top-4 md:right-6 z-30 bg-[#18181b]/95 border border-fuchsia-500/30 backdrop-blur-md px-2.5 py-1.5 md:px-3.5 md:py-2 rounded-2xl shadow-xl flex items-center gap-2 md:gap-3 animate-fade-in max-w-[200px] sm:max-w-xs md:max-w-sm">
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                <span className="h-2 w-2 rounded-full bg-fuchsia-400 animate-pulse flex-shrink-0" />
-                <div className="flex flex-col min-w-0">
-                  <span className="text-[11px] md:text-xs font-bold text-white truncate">
-                    {musicState.currentTrack.title}
-                  </span>
-                  <span className="text-[9px] md:text-[10px] text-fuchsia-300/70 truncate">
-                    {musicState.currentTrack.artist}
-                  </span>
+            <div className="absolute top-2 right-2 md:top-4 md:right-6 z-30 bg-[#18181b]/95 border border-fuchsia-500/30 backdrop-blur-md px-3 py-2 rounded-2xl shadow-2xl flex flex-col gap-1.5 animate-fade-in w-64 sm:w-80 md:w-96">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <span className="h-2 w-2 rounded-full bg-fuchsia-400 animate-pulse flex-shrink-0" />
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs md:text-sm font-bold text-white truncate">
+                      {musicState.currentTrack.title}
+                    </span>
+                    <span className="text-[10px] text-fuchsia-300/70 truncate">
+                      {musicState.currentTrack.artist}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {isYouTubeUrl(musicState.currentTrack.url) && (
+                    <button
+                      onClick={() => setShowYtVideo(!showYtVideo)}
+                      className={`p-1.5 rounded-lg text-xs transition-all border ${
+                        showYtVideo 
+                          ? 'bg-fuchsia-600/30 border-fuchsia-500/40 text-fuchsia-200' 
+                          : 'bg-white/5 border-white/10 text-white/60 hover:text-white'
+                      }`}
+                      title={showYtVideo ? "Hide YouTube Video" : "Show YouTube Video"}
+                    >
+                      {showYtVideo ? <Eye size={13} /> : <EyeOff size={13} />}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      let currentPos = musicState.lastPosition || 0;
+                      if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
+                        try { currentPos = ytPlayerRef.current.getCurrentTime(); } catch (_) {}
+                      } else if (musicAudioRef.current) {
+                        currentPos = musicAudioRef.current.currentTime;
+                      }
+
+                      if (musicState.isPlaying) {
+                        sendMusicAction('pause', musicState.currentTrackId, currentPos, musicState.currentTrack);
+                      } else {
+                        sendMusicAction('play', musicState.currentTrackId, currentPos, musicState.currentTrack);
+                      }
+                    }}
+                    className="bg-fuchsia-600 hover:bg-fuchsia-500 p-1.5 rounded-xl text-white transition-all active:scale-95 shadow-md shadow-fuchsia-950/40"
+                  >
+                    {musicState.isPlaying ? <Pause size={14} fill="white" /> : <Play size={14} fill="white" />}
+                  </button>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5 flex-shrink-0">
-                {isYouTubeUrl(musicState.currentTrack.url) && (
-                  <button
-                    onClick={() => setShowYtVideo(!showYtVideo)}
-                    className={`p-1 md:p-1.5 rounded-lg text-xs transition-all border ${
-                      showYtVideo 
-                        ? 'bg-fuchsia-600/30 border-fuchsia-500/40 text-fuchsia-200' 
-                        : 'bg-white/5 border-white/10 text-white/60 hover:text-white'
-                    }`}
-                    title={showYtVideo ? "Hide YouTube Video" : "Show YouTube Video"}
-                  >
-                    {showYtVideo ? <Eye size={12} /> : <EyeOff size={12} />}
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    let currentPos = musicState.lastPosition || 0;
-                    if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
-                      try { currentPos = ytPlayerRef.current.getCurrentTime(); } catch (_) {}
-                    } else if (musicAudioRef.current) {
-                      currentPos = musicAudioRef.current.currentTime;
-                    }
-
-                    if (musicState.isPlaying) {
-                      sendMusicAction('pause', musicState.currentTrackId, currentPos, musicState.currentTrack);
-                    } else {
-                      sendMusicAction('play', musicState.currentTrackId, currentPos, musicState.currentTrack);
-                    }
+              {/* Real-time Synchronized Interactive Timeline Scrub Bar */}
+              <div className="flex items-center gap-2 pt-0.5">
+                <span className="text-[10px] text-white/50 font-mono w-7 text-right">
+                  {Math.floor(songProgress.current / 60)}:{Math.floor(songProgress.current % 60).toString().padStart(2, '0')}
+                </span>
+                <input
+                  type="range"
+                  min="0"
+                  max={Math.max(1, songProgress.duration || 180)}
+                  step="0.5"
+                  value={songProgress.current}
+                  onMouseDown={() => { isSeekingRef.current = true; }}
+                  onTouchStart={() => { isSeekingRef.current = true; }}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    setSongProgress(prev => ({ ...prev, current: val }));
                   }}
-                  className="bg-fuchsia-600 hover:bg-fuchsia-500 p-1.5 rounded-xl text-white transition-all active:scale-95 shadow-md shadow-fuchsia-950/40"
-                >
-                  {musicState.isPlaying ? <Pause size={13} fill="white" /> : <Play size={13} fill="white" />}
-                </button>
+                  onMouseUp={(e) => {
+                    handleSeek(parseFloat((e.target as HTMLInputElement).value));
+                  }}
+                  onTouchEnd={(e) => {
+                    handleSeek(parseFloat((e.target as HTMLInputElement).value));
+                  }}
+                  className="flex-1 h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-fuchsia-500 hover:h-2 transition-all"
+                />
+                <span className="text-[10px] text-white/50 font-mono w-7">
+                  {Math.floor((songProgress.duration || 180) / 60)}:{Math.floor((songProgress.duration || 180) % 60).toString().padStart(2, '0')}
+                </span>
               </div>
             </div>
           )}
