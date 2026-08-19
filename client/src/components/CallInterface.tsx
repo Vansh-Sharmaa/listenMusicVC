@@ -382,7 +382,7 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     initAudio();
     startLocalMedia();
 
-    // Global unlock handler for browser autoplay policies
+    // Global unlock & foreground wake handler
     const unlockAudioAndVideo = () => {
       if (audioContext && audioContext.state === 'suspended') {
         audioContext.resume().catch(() => {});
@@ -394,14 +394,41 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
       }
     };
 
+    // Resynchronize immediately on tab visibility change or laptop wake
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[Sync] Tab returned to foreground — syncing clock & timeline...');
+        socketRef.current?.emit('music:sync-ping', { clientTimestamp: Date.now() });
+        if (audioContext && audioContext.state === 'suspended') {
+          audioContext.resume().catch(() => {});
+        }
+      }
+    };
+
+    // Bluetooth / headphone device switch handler
+    const handleDeviceChange = () => {
+      console.log('[Media] Audio/Video device change detected (Bluetooth/Headphones switch)');
+      if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume().catch(() => {});
+      }
+    };
+
     window.addEventListener('click', unlockAudioAndVideo);
     window.addEventListener('touchstart', unlockAudioAndVideo);
     window.addEventListener('keydown', unlockAudioAndVideo);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+      navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
+    }
 
     return () => {
       window.removeEventListener('click', unlockAudioAndVideo);
       window.removeEventListener('touchstart', unlockAudioAndVideo);
       window.removeEventListener('keydown', unlockAudioAndVideo);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (navigator.mediaDevices && navigator.mediaDevices.removeEventListener) {
+        navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
+      }
       cleanupAll();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -565,8 +592,15 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                   ytPlayerReadyRef.current = true;
                   currentYtVideoIdRef.current = ytId;
                   event.target.setVolume(Math.max(0, Math.min(100, Math.round(musicVolume * 100))));
-                  if (targetPos > 0) {
-                    event.target.seekTo(targetPos, true);
+                  
+                  // Calculate dynamic exact position at the moment the player is ready (late-joiners fix)
+                  const liveElapsed = musicState.isPlaying
+                    ? (getServerTime() - Number(musicState.lastPositionUpdatedAt || Date.now())) / 1000
+                    : 0;
+                  const liveTargetPos = Math.max(0, (musicState.lastPosition || 0) + liveElapsed);
+                  
+                  if (liveTargetPos > 0) {
+                    event.target.seekTo(liveTargetPos, true);
                   }
                   if (musicState.isPlaying) {
                     event.target.playVideo();
@@ -575,7 +609,6 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                   }
                 },
                 onStateChange: (event: any) => {
-                  // If user clicked play/pause directly on YouTube native player
                   if (isLocalTriggeredRef.current) return;
 
                   // YT.PlayerState.PLAYING = 1, PAUSED = 2
@@ -592,7 +625,10 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                   }
                 },
                 onError: (err: any) => {
-                  console.warn('[YouTube Player] Error:', err);
+                  console.warn('[YouTube Player] Error code:', err?.data);
+                  if (err?.data === 101 || err?.data === 150) {
+                    alert('Notice: The owner of this video has disabled external embedding.\n\nTip: Please paste another YouTube song link or choose one of the featured tracks!');
+                  }
                 }
               }
             });
