@@ -308,6 +308,19 @@ apiRouter.get('/lyrics', async (req: Request, res: Response) => {
     .trim();
 
   try {
+    const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 3000) => {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeout);
+      try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        clearTimeout(id);
+        return response;
+      } catch (err) {
+        clearTimeout(id);
+        throw err;
+      }
+    };
+
     // 1. Try exact match from LRCLIB
     const queryParams = new URLSearchParams({
       track_name: cleanTitle,
@@ -315,9 +328,9 @@ apiRouter.get('/lyrics', async (req: Request, res: Response) => {
       ...(duration ? { duration: duration.toString() } : {})
     });
 
-    let lrcRes = await fetch(`https://lrclib.net/api/get?${queryParams.toString()}`, {
+    let lrcRes = await fetchWithTimeout(`https://lrclib.net/api/get?${queryParams.toString()}`, {
       headers: { 'User-Agent': 'ListenMusicVC/1.0 (https://listen-music-vc.vercel.app)' }
-    });
+    }, 4000);
 
     if (lrcRes.ok) {
       const data = (await lrcRes.json()) as any;
@@ -333,9 +346,9 @@ apiRouter.get('/lyrics', async (req: Request, res: Response) => {
 
     // 2. Fallback: LRCLIB Fuzzy Search
     try {
-      const searchRes = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(`${cleanArtist} ${cleanTitle}`.trim())}`, {
+      const searchRes = await fetchWithTimeout(`https://lrclib.net/api/search?q=${encodeURIComponent(`${cleanArtist} ${cleanTitle}`.trim())}`, {
         headers: { 'User-Agent': 'ListenMusicVC/1.0 (https://listen-music-vc.vercel.app)' }
-      });
+      }, 4000);
       if (searchRes.ok) {
         const results = (await searchRes.json()) as any;
         if (Array.isArray(results) && results.length > 0) {
@@ -356,7 +369,7 @@ apiRouter.get('/lyrics', async (req: Request, res: Response) => {
 
     // 3. Fallback: Lyrist Open Lyrics API (Supports global, bollywood, indie, pop)
     try {
-      const lyristRes = await fetch(`https://lyrist.vercel.app/api/${encodeURIComponent(cleanTitle)}/${encodeURIComponent(cleanArtist)}`);
+      const lyristRes = await fetchWithTimeout(`https://lyrist.vercel.app/api/${encodeURIComponent(cleanTitle)}/${encodeURIComponent(cleanArtist)}`, {}, 3000);
       if (lyristRes.ok) {
         const lyristData = (await lyristRes.json()) as any;
         if (lyristData && lyristData.lyrics) {
@@ -376,7 +389,7 @@ apiRouter.get('/lyrics', async (req: Request, res: Response) => {
 
     // 4. Fallback: Lyrics.ovh Open API
     try {
-      const ovhRes = await fetch(`https://api.lyrics.ovh/v1/${encodeURIComponent(cleanArtist || 'Various')}/${encodeURIComponent(cleanTitle)}`);
+      const ovhRes = await fetchWithTimeout(`https://api.lyrics.ovh/v1/${encodeURIComponent(cleanArtist || 'Various')}/${encodeURIComponent(cleanTitle)}`, {}, 3000);
       if (ovhRes.ok) {
         const ovhData = (await ovhRes.json()) as any;
         if (ovhData && ovhData.lyrics) {
@@ -396,16 +409,16 @@ apiRouter.get('/lyrics', async (req: Request, res: Response) => {
 
     // 5. Fallback: NetEase Cloud Music Synced LRC API (Huge database for international & Asian music)
     try {
-      const neteaseSearch = await fetch(`https://music.163.com/api/search/get/web?s=${encodeURIComponent(`${cleanTitle} ${cleanArtist}`.trim())}&type=1&limit=5`, {
+      const neteaseSearch = await fetchWithTimeout(`https://music.163.com/api/search/get/web?s=${encodeURIComponent(`${cleanTitle} ${cleanArtist}`.trim())}&type=1&limit=5`, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-      });
+      }, 3000);
       if (neteaseSearch.ok) {
         const neteaseSearchData = (await neteaseSearch.json()) as any;
         const songId = neteaseSearchData?.result?.songs?.[0]?.id;
         if (songId) {
-          const lrcFetch = await fetch(`https://music.163.com/api/song/lyric?os=pc&id=${songId}&lv=-1&kv=-1&tv=-1`, {
+          const lrcFetch = await fetchWithTimeout(`https://music.163.com/api/song/lyric?os=pc&id=${songId}&lv=-1&kv=-1&tv=-1`, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-          });
+          }, 3000);
           if (lrcFetch.ok) {
             const lrcData = (await lrcFetch.json()) as any;
             const lrcText = lrcData?.lrc?.lyric;
