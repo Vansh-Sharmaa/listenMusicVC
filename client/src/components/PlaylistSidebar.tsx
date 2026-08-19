@@ -103,6 +103,33 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
       thumbnail: 'https://img.youtube.com/vi/jfKfPfyJRdk/hqdefault.jpg'
     },
     {
+      id: 'spotify-preset-1',
+      title: 'Starboy (feat. Daft Punk)',
+      artist: 'The Weeknd • Spotify',
+      url: 'https://open.spotify.com/track/7MXVkk9YM5IZxh0VU621v0',
+      duration: 230,
+      isRoyaltyFree: false,
+      thumbnail: 'https://open.spotifycdn.com/cdn/images/favicon32.8e66b099.png'
+    },
+    {
+      id: 'spotify-preset-2',
+      title: 'Espresso',
+      artist: 'Sabrina Carpenter • Spotify',
+      url: 'https://open.spotify.com/track/2qSk1gOKZw19PU879apHVQ',
+      duration: 175,
+      isRoyaltyFree: false,
+      thumbnail: 'https://open.spotifycdn.com/cdn/images/favicon32.8e66b099.png'
+    },
+    {
+      id: 'monochrome-preset-1',
+      title: 'Monochrome Lossless Studio',
+      artist: 'TIDAL / Hi-Fi • Monochrome',
+      url: 'https://monochrome.tf',
+      duration: 360,
+      isRoyaltyFree: true,
+      thumbnail: 'https://monochrome.tf/favicon.ico'
+    },
+    {
       id: 'online-1',
       title: 'Lofi Chill Study Beats',
       artist: 'Lofi Records',
@@ -127,6 +154,8 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
       isRoyaltyFree: true,
     }
   ];
+
+  const [selectedCategory, setSelectedCategory] = useState<'all' | 'youtube' | 'spotify' | 'monochrome' | 'lofi'>('all');
 
   const fetchTracks = async () => {
     try {
@@ -422,26 +451,55 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onStartScreenS
         )}
       </div>
 
+      {/* Category Tabs: All, YouTube, Spotify, Monochrome, Lofi */}
+      <div className="px-3 pt-2.5 pb-1 flex gap-1 overflow-x-auto border-b border-white/5 scrollbar-none">
+        {[
+          { id: 'all', label: 'All' },
+          { id: 'youtube', label: '🔴 YouTube' },
+          { id: 'spotify', label: '🟢 Spotify' },
+          { id: 'monochrome', label: '⚫ Monochrome' },
+          { id: 'lofi', label: '📻 Lofi' }
+        ].map((cat) => (
+          <button
+            key={cat.id}
+            onClick={() => setSelectedCategory(cat.id as any)}
+            className={`text-[10px] font-bold px-2.5 py-1 rounded-lg whitespace-nowrap transition-all ${
+              selectedCategory === cat.id
+                ? 'bg-fuchsia-600 text-white shadow-sm'
+                : 'bg-white/5 hover:bg-white/10 text-white/50 hover:text-white'
+            }`}
+          >
+            {cat.label}
+          </button>
+        ))}
+      </div>
+
       {/* Online Streams & Tracks List */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        <span className="text-xs font-semibold text-white/40 px-1 uppercase tracking-wider block mb-2">
-          Featured & Trending Tracks
-        </span>
         {loading ? (
           <div className="flex items-center justify-center py-10 text-white/30 text-xs">
             <Loader2 size={16} className="animate-spin mr-2" />
             Loading music...
           </div>
         ) : (
-          tracks.map((track) => {
-            const isCurrent = track.id === musicState.currentTrackId;
-            const badge = isYouTubeUrl(track.url)
-              ? { label: 'YOUTUBE', color: 'bg-red-500/20 text-red-300 border-red-500/30' }
-              : isSpotifyUrl(track.url)
-              ? { label: 'SPOTIFY', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' }
-              : isMonochromeUrl(track.url)
-              ? { label: 'MONOCHROME', color: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' }
-              : { label: 'LOSSLESS', color: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30' };
+          tracks
+            .filter((t) => {
+              if (selectedCategory === 'all') return true;
+              if (selectedCategory === 'youtube') return isYouTubeUrl(t.url);
+              if (selectedCategory === 'spotify') return isSpotifyUrl(t.url);
+              if (selectedCategory === 'monochrome') return isMonochromeUrl(t.url) || t.url.includes('flac');
+              if (selectedCategory === 'lofi') return t.title.toLowerCase().includes('lofi') || t.isRoyaltyFree;
+              return true;
+            })
+            .map((track) => {
+              const isCurrent = track.id === musicState.currentTrackId;
+              const badge = isYouTubeUrl(track.url)
+                ? { label: 'YOUTUBE', color: 'bg-red-500/20 text-red-300 border-red-500/30' }
+                : isSpotifyUrl(track.url)
+                ? { label: 'SPOTIFY', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' }
+                : isMonochromeUrl(track.url)
+                ? { label: 'MONOCHROME', color: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' }
+                : { label: 'LOSSLESS', color: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30' };
 
             return (
               <button

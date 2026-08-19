@@ -27,7 +27,12 @@ import {
   Radio,
   Eye,
   EyeOff,
-  Volume2
+  Volume2,
+  Maximize2,
+  Minimize2,
+  ExternalLink,
+  Sparkles,
+  Disc
 } from 'lucide-react';
 
 interface CallInterfaceProps {
@@ -434,8 +439,9 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, userId, username, audioContext]);
 
-  // YouTube Synchronized Player state & refs
+  // Multi-Platform Player state & refs
   const [showYtVideo, setShowYtVideo] = useState(true);
+  const [isPlayerExpanded, setIsPlayerExpanded] = useState(false);
   const ytPlayerRef = useRef<any>(null);
   const ytPlayerReadyRef = useRef<boolean>(false);
   const currentYtVideoIdRef = useRef<string | null>(null);
@@ -1504,6 +1510,15 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                 />
               )}
 
+              {/* Expand to Theater Mode Button */}
+              <button
+                onClick={() => setIsPlayerExpanded(true)}
+                className="absolute top-1.5 right-8 md:top-2 md:right-9 bg-black/80 hover:bg-black text-white/80 hover:text-white p-1 rounded-full text-xs z-40 backdrop-blur-sm border border-white/10"
+                title="Expand Center Stage View"
+              >
+                <Maximize2 size={13} />
+              </button>
+
               <button
                 onClick={() => setShowYtVideo(!showYtVideo)}
                 className="absolute top-1.5 right-1.5 md:top-2 md:right-2 bg-black/80 hover:bg-black text-white/80 hover:text-white p-1 rounded-full text-xs z-40 backdrop-blur-sm border border-white/10"
@@ -1511,6 +1526,158 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
               >
                 {showYtVideo ? <EyeOff size={13} /> : <Eye size={13} />}
               </button>
+            </div>
+          )}
+
+          {/* Full Center-Stage Theater View for Monochrome, Spotify & YouTube */}
+          {isPlayerExpanded && musicState.currentTrack && (
+            <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-3 sm:p-6 animate-fade-in">
+              <div className="bg-[#121214] border border-white/15 rounded-3xl w-full max-w-5xl h-[88vh] max-h-[800px] shadow-2xl flex flex-col overflow-hidden relative">
+                {/* Center Stage Header */}
+                <div className="p-4 border-b border-white/10 bg-white/5 flex items-center justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="h-2.5 w-2.5 rounded-full bg-fuchsia-400 animate-pulse flex-shrink-0" />
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-base font-bold text-white truncate">
+                        {musicState.currentTrack.title}
+                      </span>
+                      <span className="text-xs text-fuchsia-300/80 truncate">
+                        {musicState.currentTrack.artist}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-emerald-400 font-semibold hidden sm:flex items-center gap-1.5 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
+                      <Radio size={12} className="animate-pulse" />
+                      Live Room Sync
+                    </span>
+                    <button
+                      onClick={() => setIsPlayerExpanded(false)}
+                      className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-xl text-xs transition-all active:scale-95 border border-white/15 flex items-center gap-1.5 font-bold"
+                    >
+                      <Minimize2 size={15} />
+                      <span className="hidden sm:inline">Minimize</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Main Player Display Area */}
+                <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
+                  {/* YouTube Player */}
+                  {isYouTubeUrl(musicState.currentTrack.url) && (
+                    <div className="w-full h-full aspect-video flex items-center justify-center">
+                      <iframe
+                        src={`https://www.youtube.com/embed/${extractYouTubeId(musicState.currentTrack.url)}?autoplay=1&enablejsapi=1`}
+                        className="w-full h-full border-0"
+                        allow="autoplay; encrypted-media; picture-in-picture"
+                        allowFullScreen
+                      />
+                    </div>
+                  )}
+
+                  {/* Spotify Player */}
+                  {extractSpotifyInfo(musicState.currentTrack.url) && (
+                    <iframe
+                      src={extractSpotifyInfo(musicState.currentTrack.url)?.embedUrl}
+                      width="100%"
+                      height="100%"
+                      frameBorder="0"
+                      allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                      loading="lazy"
+                      className="w-full h-full p-2"
+                    />
+                  )}
+
+                  {/* Monochrome Lossless Web Frame */}
+                  {isMonochromeUrl(musicState.currentTrack.url) && (
+                    <iframe
+                      src={musicState.currentTrack.url.startsWith('http') ? musicState.currentTrack.url : `https://${musicState.currentTrack.url}`}
+                      width="100%"
+                      height="100%"
+                      frameBorder="0"
+                      allow="autoplay; encrypted-media; fullscreen"
+                      loading="lazy"
+                      className="w-full h-full bg-[#121212]"
+                    />
+                  )}
+
+                  {/* Direct Audio Player Visualizer */}
+                  {!isYouTubeUrl(musicState.currentTrack.url) && !extractSpotifyInfo(musicState.currentTrack.url) && !isMonochromeUrl(musicState.currentTrack.url) && (
+                    <div className="text-center space-y-4 p-8">
+                      <div className="w-24 h-24 rounded-full bg-fuchsia-600/30 border border-fuchsia-400/40 flex items-center justify-center mx-auto shadow-2xl text-fuchsia-300 animate-pulse">
+                        <Disc size={48} className="animate-spin" style={{ animationDuration: '6s' }} />
+                      </div>
+                      <div className="space-y-1">
+                        <h3 className="text-xl font-bold text-white">{musicState.currentTrack.title}</h3>
+                        <p className="text-sm text-white/60">{musicState.currentTrack.artist}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Center Stage Shared Scrubber & Control Footer */}
+                <div className="p-4 border-t border-white/10 bg-white/5 flex flex-col gap-3">
+                  {/* Timeline Bar */}
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-white/60 font-mono w-10 text-right">
+                      {Math.floor(songProgress.current / 60)}:{(Math.floor(songProgress.current % 60)).toString().padStart(2, '0')}
+                    </span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={songProgress.duration || 300}
+                      value={songProgress.current}
+                      onMouseDown={() => { isSeekingRef.current = true; }}
+                      onTouchStart={() => { isSeekingRef.current = true; }}
+                      onChange={(e) => setSongProgress(prev => ({ ...prev, current: parseFloat(e.target.value) }))}
+                      onMouseUp={(e) => handleSeek(parseFloat((e.target as HTMLInputElement).value))}
+                      onTouchEnd={(e) => handleSeek(parseFloat((e.target as HTMLInputElement).value))}
+                      className="flex-1 accent-fuchsia-500 h-1.5 bg-white/20 rounded-lg cursor-pointer transition-all"
+                    />
+                    <span className="text-xs text-white/60 font-mono w-10">
+                      {Math.floor((songProgress.duration || 0) / 60)}:{(Math.floor((songProgress.duration || 0) % 60)).toString().padStart(2, '0')}
+                    </span>
+                  </div>
+
+                  {/* Control Buttons */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          let currentPos = musicState.lastPosition || 0;
+                          if (ytPlayerRef.current && ytPlayerReadyRef.current && ytPlayerRef.current.getCurrentTime) {
+                            try { currentPos = ytPlayerRef.current.getCurrentTime(); } catch (_) {}
+                          } else if (musicAudioRef.current) {
+                            currentPos = musicAudioRef.current.currentTime;
+                          }
+
+                          if (musicState.isPlaying) {
+                            sendMusicAction('pause', musicState.currentTrackId, currentPos, musicState.currentTrack);
+                          } else {
+                            sendMusicAction('play', musicState.currentTrackId, currentPos, musicState.currentTrack);
+                          }
+                        }}
+                        className="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold px-4 py-2 rounded-xl transition-all active:scale-95 shadow-md shadow-fuchsia-950/40 flex items-center gap-2 text-xs"
+                      >
+                        {musicState.isPlaying ? <Pause size={14} fill="white" /> : <Play size={14} fill="white" />}
+                        <span>{musicState.isPlaying ? 'Pause for Room' : 'Play for Room'}</span>
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setActiveSidebar('music');
+                        setIsPlayerExpanded(false);
+                      }}
+                      className="text-xs text-fuchsia-300 hover:text-fuchsia-200 flex items-center gap-1.5 font-semibold bg-white/5 hover:bg-white/10 px-3 py-2 rounded-xl border border-white/10 transition-all"
+                    >
+                      <Music size={13} />
+                      <span>Browse Songs & Playlists</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1531,6 +1698,14 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <button
+                    onClick={() => setIsPlayerExpanded(!isPlayerExpanded)}
+                    className="p-1.5 rounded-lg text-xs bg-white/5 hover:bg-white/15 border border-white/10 text-white/80 hover:text-white transition-all"
+                    title={isPlayerExpanded ? "Minimize Theater View" : "Expand Center Stage"}
+                  >
+                    {isPlayerExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                  </button>
+
                   {isYouTubeUrl(musicState.currentTrack.url) && (
                     <button
                       onClick={() => setShowYtVideo(!showYtVideo)}
