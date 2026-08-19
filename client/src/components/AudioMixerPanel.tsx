@@ -21,6 +21,12 @@ export const AudioMixerPanel: React.FC = () => {
     duckingAmount,
     setDuckingAmount,
     isSpeaking,
+    micEchoCancellation,
+    setMicEchoCancellation,
+    micNoiseSuppression,
+    setMicNoiseSuppression,
+    micAutoGainControl,
+    setMicAutoGainControl
   } = useAudioMixer();
 
   return (
@@ -109,6 +115,67 @@ export const AudioMixerPanel: React.FC = () => {
             onChange={(e) => setMicVolume(parseFloat(e.target.value))}
             className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
           />
+        </div>
+
+        {/* Microphone Hardware Features */}
+        <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/5 shadow-inner">
+          <span className="text-xs font-bold uppercase tracking-wider text-white/40 block mb-1">
+            🎙️ Mic Hardware Processing
+          </span>
+
+          {/* Echo Cancellation */}
+          <div className="flex justify-between items-center text-sm">
+            <div className="flex flex-col">
+              <span className="font-semibold text-white/90">Echo Cancellation</span>
+              <span className="text-[10px] text-white/40">Prevents speakers loopback</span>
+            </div>
+            <button
+              onClick={() => setMicEchoCancellation(!micEchoCancellation)}
+              className="text-emerald-400 hover:text-emerald-300 transition-colors focus:outline-none"
+            >
+              {micEchoCancellation ? (
+                <ToggleRight size={30} className="fill-emerald-500/20" />
+              ) : (
+                <ToggleLeft size={30} className="text-white/40" />
+              )}
+            </button>
+          </div>
+
+          {/* Noise Suppression */}
+          <div className="flex justify-between items-center text-sm">
+            <div className="flex flex-col">
+              <span className="font-semibold text-white/90">Noise Suppression</span>
+              <span className="text-[10px] text-white/40">Filters background noise</span>
+            </div>
+            <button
+              onClick={() => setMicNoiseSuppression(!micNoiseSuppression)}
+              className="text-emerald-400 hover:text-emerald-300 transition-colors focus:outline-none"
+            >
+              {micNoiseSuppression ? (
+                <ToggleRight size={30} className="fill-emerald-500/20" />
+              ) : (
+                <ToggleLeft size={30} className="text-white/40" />
+              )}
+            </button>
+          </div>
+
+          {/* Auto Gain Control */}
+          <div className="flex justify-between items-center text-sm">
+            <div className="flex flex-col">
+              <span className="font-semibold text-white/90">Auto Gain Control</span>
+              <span className="text-[10px] text-white/40">Auto leveling (Pro Audio off)</span>
+            </div>
+            <button
+              onClick={() => setMicAutoGainControl(!micAutoGainControl)}
+              className="text-emerald-400 hover:text-emerald-300 transition-colors focus:outline-none"
+            >
+              {micAutoGainControl ? (
+                <ToggleRight size={30} className="fill-emerald-500/20" />
+              ) : (
+                <ToggleLeft size={30} className="text-white/40" />
+              )}
+            </button>
+          </div>
         </div>
 
         <hr className="border-white/10 my-6" />

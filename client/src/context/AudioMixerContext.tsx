@@ -28,6 +28,12 @@ interface AudioMixerContextType {
   getMusicTrack: () => MediaStreamTrack | null;
   isSpeaking: boolean;
   audioContext: AudioContext | null;
+  micEchoCancellation: boolean;
+  setMicEchoCancellation: (v: boolean) => void;
+  micNoiseSuppression: boolean;
+  setMicNoiseSuppression: (v: boolean) => void;
+  micAutoGainControl: boolean;
+  setMicAutoGainControl: (v: boolean) => void;
 }
 
 const AudioMixerContext = createContext<AudioMixerContextType | undefined>(undefined);
@@ -52,6 +58,41 @@ export const AudioMixerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [duckingThreshold, setDuckingThreshold] = useState<number>(0.02); // RMS amplitude threshold
   const [duckingAmount, setDuckingAmount] = useState<number>(0.7); // 70% reduction by default
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+
+  // Mic processing options with localStorage persistence
+  const [micEchoCancellation, setMicEchoCancellation] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('mic_echo_cancellation');
+      return stored !== null ? stored === 'true' : true;
+    }
+    return true;
+  });
+  const [micNoiseSuppression, setMicNoiseSuppression] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('mic_noise_suppression');
+      return stored !== null ? stored === 'true' : true;
+    }
+    return true;
+  });
+  const [micAutoGainControl, setMicAutoGainControl] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('mic_auto_gain_control');
+      return stored !== null ? stored === 'true' : false;
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('mic_echo_cancellation', String(micEchoCancellation));
+  }, [micEchoCancellation]);
+
+  useEffect(() => {
+    localStorage.setItem('mic_noise_suppression', String(micNoiseSuppression));
+  }, [micNoiseSuppression]);
+
+  useEffect(() => {
+    localStorage.setItem('mic_auto_gain_control', String(micAutoGainControl));
+  }, [micAutoGainControl]);
 
   // Sync refs to avoid stale closures in requestAnimationFrame loops
   const duckingEnabledRef = useRef(duckingEnabled);
@@ -421,6 +462,12 @@ export const AudioMixerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         processLocalMicTrack,
         isSpeaking,
         audioContext: audioContextRef.current,
+        micEchoCancellation,
+        setMicEchoCancellation,
+        micNoiseSuppression,
+        setMicNoiseSuppression,
+        micAutoGainControl,
+        setMicAutoGainControl,
       }}
     >
       {children}

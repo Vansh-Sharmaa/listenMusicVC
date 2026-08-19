@@ -208,7 +208,10 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
     getMusicTrack,
     musicVolume,
     registerMusicElement,
-    audioContext
+    audioContext,
+    micEchoCancellation,
+    micNoiseSuppression,
+    micAutoGainControl
   } = useAudioMixer();
 
   // Local media state
@@ -1135,9 +1138,9 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
         try {
           audioStream = await navigator.mediaDevices.getUserMedia({
             audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: false
+              echoCancellation: micEchoCancellation,
+              noiseSuppression: micNoiseSuppression,
+              autoGainControl: micAutoGainControl
             }
           });
         } catch (firstErr) {
@@ -1494,7 +1497,11 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
           let realStream;
           try {
             realStream = await navigator.mediaDevices.getUserMedia({
-              audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false }
+              audio: {
+                echoCancellation: micEchoCancellation,
+                noiseSuppression: micNoiseSuppression,
+                autoGainControl: micAutoGainControl
+              }
             });
           } catch (firstErr) {
             console.warn('[Media] Ideal audio constraints failed, trying basic audio:true...', firstErr);
@@ -1624,6 +1631,48 @@ export const CallInterface: React.FC<CallInterfaceProps> = ({
 
     console.log(`[Media] Camera toggled: ${newCamState ? 'ON 📷' : 'OFF 🚫'}`);
   };
+
+  // Re-acquire microphone track in-flight if user toggles Echo Cancellation, Noise Suppression, or Auto Gain Control
+  useEffect(() => {
+    if (micOn && localStreamRef.current) {
+      console.log('[Media] Mic processing settings updated, dynamically re-acquiring microphone hardware track...');
+      const reacquireMic = async () => {
+        const audioTracks = localStreamRef.current?.getAudioTracks() || [];
+        if (audioTracks.length > 0) {
+          try {
+            const realStream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                echoCancellation: micEchoCancellation,
+                noiseSuppression: micNoiseSuppression,
+                autoGainControl: micAutoGainControl
+              }
+            });
+            const realTrack = realStream.getAudioTracks()[0];
+            if (realTrack) {
+              const oldTrack = audioTracks[0];
+              localStreamRef.current?.removeTrack(oldTrack);
+              oldTrack.stop();
+              localStreamRef.current?.addTrack(realTrack);
+              
+              // Hot-swap the track in all WebRTC connections instantly without dropping the call
+              peerConnectionsRef.current.forEach(pc => {
+                pc.getSenders().forEach(s => {
+                  if (s.track?.kind === 'audio' && !Array.from(screenShareSendersRef.current.values()).some(list => list.includes(s))) {
+                    s.replaceTrack(realTrack).catch(() => {});
+                  }
+                });
+              });
+              processLocalMicTrack(realTrack).catch(() => {});
+              console.log('[Media] In-flight WebRTC mic track successfully hot-swapped!');
+            }
+          } catch (err) {
+            console.warn('[Media] Failed to reacquire mic track with updated settings:', err);
+          }
+        }
+      };
+      reacquireMic();
+    }
+  }, [micEchoCancellation, micNoiseSuppression, micAutoGainControl, processLocalMicTrack]);
 
   const toggleScreenShare = async () => {
     if (isScreenSharing) {
